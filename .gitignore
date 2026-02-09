@@ -12,3 +12,9 @@ test_gemma4b.html
 # codedocent AI analysis cache
 .codedocent_cache/
 .codedocent_cache.json
+
+# Packaging
+*.egg-info/
+
+# Virtual environment
+.venv/
