@@ -120,6 +120,52 @@ def _start_idle_watcher(
     watcher.start()
 
 
+def _analyze_node(node_id: str) -> dict | None:
+    """Look up *node_id* and return an analyzed dict, or None if not found."""
+    if node_id not in _Handler.node_lookup:
+        return None
+    node = _Handler.node_lookup[node_id]
+    if node.summary is not None:
+        return _node_to_dict(node, include_source=True)
+    with _Handler.analyze_lock:
+        if node.summary is None:
+            from codedocent.analyzer import analyze_single_node  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+            analyze_single_node(node, _Handler.model, _Handler.cache_dir)
+    return _node_to_dict(node, include_source=True)
+
+
+def _execute_replace(node_id: str, body: dict) -> tuple[int, dict]:
+    """Validate and execute a source-replacement request.
+
+    Returns ``(status_code, result_dict)``.
+    """
+    if node_id not in _Handler.node_lookup:
+        return (404, {"success": False, "error": "Unknown node ID"})
+    node = _Handler.node_lookup[node_id]
+    if node.node_type in ("directory", "file"):
+        return (
+            400,
+            {"success": False,
+             "error": "Cannot replace directory/file blocks"},
+        )
+    new_source = body.get("source", "")
+    if not isinstance(new_source, str):
+        return (400, {"success": False, "error": "source must be a string"})
+    abs_path = _resolve_filepath(node, _Handler.cache_dir)
+    from codedocent.editor import replace_block_source  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+    with _Handler.analyze_lock:
+        result = replace_block_source(
+            abs_path, node.start_line, node.end_line, new_source,
+        )
+        if result["success"]:
+            _update_node_after_replace(
+                node, new_source, result, _Handler.cache_dir,
+            )
+    return (200, result)
+
+
 class _Handler(BaseHTTPRequestHandler):
     """HTTP request handler for codedocent server."""
 
@@ -175,101 +221,30 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _serve_tree(self):
-        tree_dict = _node_to_dict(_Handler.root)
-        data = json.dumps(tree_dict).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_json(200, _node_to_dict(_Handler.root))
 
     def _handle_source(self, node_id: str):
         if node_id not in _Handler.node_lookup:
             self.send_error(404, "Unknown node ID")
             return
         node = _Handler.node_lookup[node_id]
-        result = {"source": node.source or ""}
-        data = json.dumps(result).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_json(200, {"source": node.source or ""})
 
     def _handle_analyze(self, node_id: str):
-        if node_id not in _Handler.node_lookup:
+        result = _analyze_node(node_id)
+        if result is None:
             self.send_error(404, "Unknown node ID")
             return
-
-        node = _Handler.node_lookup[node_id]
-
-        # Return cached result if already analyzed
-        if node.summary is not None:
-            result = _node_to_dict(node, include_source=True)
-            data = json.dumps(result).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
-
-        # Run analysis (thread-safe)
-        with _Handler.analyze_lock:
-            # Double-check after acquiring lock
-            if node.summary is None:
-                from codedocent.analyzer import analyze_single_node  # pylint: disable=import-outside-toplevel  # noqa: E501
-
-                analyze_single_node(node, _Handler.model, _Handler.cache_dir)
-
-        result = _node_to_dict(node, include_source=True)
-        data = json.dumps(result).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_json(200, result)
 
     def _handle_replace(self, node_id: str):
-        if node_id not in _Handler.node_lookup:
-            self.send_error(404, "Unknown node ID")
-            return
-
-        node = _Handler.node_lookup[node_id]
-
-        if node.node_type in ("directory", "file"):
-            self._send_json(
-                400,
-                {"success": False,
-                 "error": "Cannot replace directory/file blocks"},
-            )
-            return
-
         content_length = int(self.headers["Content-Length"])
         body = json.loads(self.rfile.read(content_length))
-        new_source = body.get("source", "")
-
-        if not isinstance(new_source, str):
-            self._send_json(
-                400,
-                {"success": False, "error": "source must be a string"},
-            )
+        status, result = _execute_replace(node_id, body)
+        if status == 404:
+            self.send_error(404, result["error"])
             return
-
-        abs_path = _resolve_filepath(node, _Handler.cache_dir)
-
-        from codedocent.editor import replace_block_source  # pylint: disable=import-outside-toplevel  # noqa: E501
-
-        with _Handler.analyze_lock:
-            result = replace_block_source(
-                abs_path, node.start_line, node.end_line, new_source,
-            )
-            if result["success"]:
-                _update_node_after_replace(
-                    node, new_source, result, _Handler.cache_dir,
-                )
-
-        self._send_json(200, result)
+        self._send_json(status, result)
 
     def _send_json(self, status_code: int, obj: dict):
         data = json.dumps(obj).encode("utf-8")

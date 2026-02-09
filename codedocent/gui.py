@@ -20,23 +20,15 @@ _check_ollama = check_ollama
 _fetch_ollama_models = fetch_ollama_models
 
 
-def _build_gui() -> None:
-    """Build and run the tkinter GUI window."""
-    root = tk.Tk()
-    root.title("codedocent")
-    root.resizable(False, False)
-
-    frame = ttk.Frame(root, padding=16)
-    frame.grid(row=0, column=0, sticky="nsew")
-
-    # --- Folder picker ---
+def _create_folder_row(frame: ttk.Frame) -> tk.StringVar:
+    """Create the folder-picker row and return the StringVar."""
     ttk.Label(frame, text="Folder to analyze:").grid(
         row=0, column=0, sticky="w", pady=(0, 4),
     )
-
     folder_var = tk.StringVar()
-    folder_entry = ttk.Entry(frame, textvariable=folder_var, width=40)
-    folder_entry.grid(row=1, column=0, sticky="ew", padx=(0, 6))
+    ttk.Entry(frame, textvariable=folder_var, width=40).grid(
+        row=1, column=0, sticky="ew", padx=(0, 6),
+    )
 
     def _browse() -> None:
         path = filedialog.askdirectory()
@@ -46,46 +38,50 @@ def _build_gui() -> None:
     ttk.Button(frame, text="Browse...", command=_browse).grid(
         row=1, column=1, sticky="w",
     )
+    return folder_var
 
-    # --- Model dropdown ---
+
+def _create_model_row(frame: ttk.Frame) -> tk.StringVar:
+    """Create the model-dropdown row and return the StringVar."""
     ttk.Label(frame, text="Model:").grid(
         row=2, column=0, sticky="w", pady=(12, 4),
     )
-
     ollama_ok = _check_ollama()
     models = _fetch_ollama_models() if ollama_ok else []
-
     model_values = models if models else ["No AI"]
     model_var = tk.StringVar(value=model_values[0])
-    model_combo = ttk.Combobox(
+    ttk.Combobox(
         frame, textvariable=model_var, values=model_values,
         state="readonly", width=37,
-    )
-    model_combo.grid(row=3, column=0, columnspan=2, sticky="ew")
+    ).grid(row=3, column=0, columnspan=2, sticky="ew")
+    return model_var
 
-    # --- Mode selector ---
+
+def _create_mode_row(frame: ttk.Frame) -> tk.StringVar:
+    """Create the mode-selector row and return the StringVar."""
     ttk.Label(frame, text="Mode:").grid(
         row=4, column=0, sticky="w", pady=(12, 4),
     )
-
     mode_var = tk.StringVar(value="interactive")
     modes_frame = ttk.Frame(frame)
     modes_frame.grid(row=5, column=0, columnspan=2, sticky="w")
+    for text, value in [("Interactive", "interactive"),
+                        ("Full export", "full"),
+                        ("Text tree", "text")]:
+        ttk.Radiobutton(
+            modes_frame, text=text, variable=mode_var, value=value,
+        ).pack(anchor="w")
+    return mode_var
 
-    ttk.Radiobutton(
-        modes_frame, text="Interactive", variable=mode_var,
-        value="interactive",
-    ).pack(anchor="w")
-    ttk.Radiobutton(
-        modes_frame, text="Full export", variable=mode_var,
-        value="full",
-    ).pack(anchor="w")
-    ttk.Radiobutton(
-        modes_frame, text="Text tree", variable=mode_var,
-        value="text",
-    ).pack(anchor="w")
 
-    # --- Go button ---
+def _create_go_button(
+    frame: ttk.Frame,
+    root: tk.Tk,
+    folder_var: tk.StringVar,
+    model_var: tk.StringVar,
+    mode_var: tk.StringVar,
+) -> None:
+    """Create the Go button with its launch logic."""
     def _go() -> None:
         folder = folder_var.get().strip()
         if not folder:
@@ -111,6 +107,21 @@ def _build_gui() -> None:
     ttk.Button(frame, text="Go", command=_go).grid(
         row=6, column=0, columnspan=2, pady=(16, 0),
     )
+
+
+def _build_gui() -> None:
+    """Build and run the tkinter GUI window."""
+    root = tk.Tk()
+    root.title("codedocent")
+    root.resizable(False, False)
+
+    frame = ttk.Frame(root, padding=16)
+    frame.grid(row=0, column=0, sticky="nsew")
+
+    folder_var = _create_folder_row(frame)
+    model_var = _create_model_row(frame)
+    mode_var = _create_mode_row(frame)
+    _create_go_button(frame, root, folder_var, model_var, mode_var)
 
     root.mainloop()
 

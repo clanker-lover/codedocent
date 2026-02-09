@@ -6,6 +6,41 @@ import os
 import shutil
 
 
+def _read_and_validate(
+    filepath: str, start_line: int, end_line: int,
+) -> tuple[list[str] | None, str | None]:
+    """Read *filepath* and validate the line range.
+
+    Returns ``(lines, None)`` on success, or ``(None, error_message)``
+    on failure.
+    """
+    if not os.path.isfile(filepath):
+        return (None, f"File not found: {filepath}")
+    if (
+        not isinstance(start_line, int)
+        or not isinstance(end_line, int)
+        or start_line < 1
+        or end_line < 1
+        or start_line > end_line
+    ):
+        return (None, f"Invalid line range: {start_line}-{end_line}")
+    with open(filepath, encoding="utf-8") as f:
+        lines = f.readlines()
+    if end_line > len(lines):
+        return (
+            None,
+            f"end_line {end_line} exceeds file length ({len(lines)} lines)",
+        )
+    return (lines, None)
+
+
+def _write_with_backup(filepath: str, lines: list[str]) -> None:
+    """Create a ``.bak`` backup and write *lines* back to *filepath*."""
+    shutil.copy2(filepath, filepath + ".bak")
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
 def replace_block_source(
     filepath: str,
     start_line: int,
@@ -18,45 +53,16 @@ def replace_block_source(
     ``success``, ``lines_before``, ``lines_after`` on success, or
     ``success=False`` and ``error`` on failure.
     """
-    # --- input validation ---
-    if not os.path.isfile(filepath):
-        return {"success": False, "error": f"File not found: {filepath}"}
-
-    if (
-        not isinstance(start_line, int)
-        or not isinstance(end_line, int)
-        or start_line < 1
-        or end_line < 1
-        or start_line > end_line
-    ):
-        return {
-            "success": False,
-            "error": (
-                f"Invalid line range: {start_line}-{end_line}"
-            ),
-        }
-
     if not isinstance(new_source, str):
         return {"success": False, "error": "new_source must be a string"}
 
+    lines, error = _read_and_validate(filepath, start_line, end_line)
+    if lines is None:
+        return {"success": False, "error": error}
+
+    old_count = end_line - start_line + 1
+
     try:
-        with open(filepath, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        if end_line > len(lines):
-            return {
-                "success": False,
-                "error": (
-                    f"end_line {end_line} exceeds file length"
-                    f" ({len(lines)} lines)"
-                ),
-            }
-
-        old_count = end_line - start_line + 1
-
-        # Backup
-        shutil.copy2(filepath, filepath + ".bak")
-
         # Build replacement lines
         if new_source == "":
             new_lines: list[str] = []
@@ -69,11 +75,9 @@ def replace_block_source(
             new_lines = [ln + "\n" for ln in new_lines]
 
         new_count = len(new_lines)
-
         lines[start_line - 1:end_line] = new_lines
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+        _write_with_backup(filepath, lines)
 
         return {
             "success": True,
