@@ -8,7 +8,6 @@ import socketserver
 import threading
 import time
 import webbrowser
-from functools import partial
 from http.server import BaseHTTPRequestHandler
 
 from codedocent.parser import CodeNode
@@ -39,9 +38,15 @@ def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
         "pseudocode": node.pseudocode,
         "quality": node.quality,
         "warnings": node.warnings,
-        "color": LANGUAGE_COLORS.get(node.language, DEFAULT_COLOR) if node.language else DEFAULT_COLOR,
+        "color": (
+            LANGUAGE_COLORS.get(node.language, DEFAULT_COLOR)
+            if node.language else DEFAULT_COLOR
+        ),
         "icon": NODE_ICONS.get(node.node_type, ""),
-        "children": [_node_to_dict(c, include_source=include_source) for c in node.children],
+        "children": [
+            _node_to_dict(c, include_source=include_source)
+            for c in node.children
+        ],
     }
     if include_source:
         d["source"] = node.source
@@ -50,7 +55,7 @@ def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
 
 def _find_open_port(start: int = 8420) -> int:
     """Find an available port starting from *start*."""
-    import socket
+    import socket  # pylint: disable=import-outside-toplevel
 
     for port in range(start, start + 100):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -62,7 +67,7 @@ def _find_open_port(start: int = 8420) -> int:
     raise RuntimeError("Could not find an open port")
 
 
-def start_server(
+def start_server(  # pylint: disable=too-many-locals,too-many-statements
     root: CodeNode,
     node_lookup: dict[str, CodeNode],
     model: str,
@@ -83,18 +88,21 @@ def start_server(
     cache_dir = root.filepath or "."
 
     # Pre-render HTML once
-    from codedocent.renderer import render_interactive
+    from codedocent.renderer import render_interactive  # pylint: disable=import-outside-toplevel  # noqa: E501
 
     html_content = render_interactive(root)
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # noqa: A002
+        """HTTP request handler for codedocent server."""
+
+        def log_message(self, format, *args):  # pylint: disable=redefined-builtin  # noqa: A002,E501
             pass  # silence default logging
 
         def _touch(self):
             last_request_time[0] = time.time()
 
-        def do_GET(self):
+        def do_GET(self):  # pylint: disable=invalid-name
+            """Handle GET requests."""
             self._touch()
             if self.path == "/":
                 self._serve_html()
@@ -103,7 +111,8 @@ def start_server(
             else:
                 self.send_error(404)
 
-        def do_POST(self):
+        def do_POST(self):  # pylint: disable=invalid-name
+            """Handle POST requests."""
             self._touch()
             if self.path == "/shutdown":
                 self._handle_shutdown()
@@ -152,7 +161,7 @@ def start_server(
             with analyze_lock:
                 # Double-check after acquiring lock
                 if node.summary is None:
-                    from codedocent.analyzer import analyze_single_node
+                    from codedocent.analyzer import analyze_single_node  # pylint: disable=import-outside-toplevel  # noqa: E501
 
                     analyze_single_node(node, model, cache_dir)
 
@@ -190,12 +199,11 @@ def start_server(
 
     # Signal handler for clean Ctrl-C (only works in main thread)
     original_sigint = None
-    import threading as _threading_check
 
-    if _threading_check.current_thread() is _threading_check.main_thread():
+    if threading.current_thread() is threading.main_thread():
         original_sigint = signal.getsignal(signal.SIGINT)
 
-        def _sigint_handler(signum, frame):
+        def _sigint_handler(_signum, _frame):
             print("\nShutting down...", flush=True)
             threading.Thread(target=server.shutdown, daemon=True).start()
 

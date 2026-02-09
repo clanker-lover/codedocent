@@ -16,7 +16,7 @@ from codedocent.parser import CodeNode
 try:
     import ollama
 except ImportError:
-    ollama = None
+    ollama = None  # type: ignore[assignment]
 
 CACHE_FILENAME = ".codedocent_cache.json"
 MAX_SOURCE_LINES = 200
@@ -49,8 +49,10 @@ def _build_prompt(node: CodeNode, model: str = "") -> str:
     prompt = (
         f"You are a code explainer for non-programmers. "
         f"Given the following {language} code, provide:\n\n"
-        f"1. SUMMARY: A plain English explanation (1-3 sentences) that a "
-        f"non-programmer can understand. Explain WHAT it does and WHY, not HOW. "
+        f"1. SUMMARY: A plain English explanation (1-3 sentences) "
+        f"that a "
+        f"non-programmer can understand. Explain WHAT it does "
+        f"and WHY, not HOW. "
         f"Avoid jargon.\n\n"
         f"2. PSEUDOCODE: A simplified pseudocode version using plain English "
         f"function/variable names. Keep it short.\n\n"
@@ -114,7 +116,7 @@ def _summarize_with_ai(
     response = ollama.chat(
         model=model, messages=[{"role": "user", "content": prompt}]
     )
-    raw = response.message.content
+    raw = response.message.content or ""  # pylint: disable=no-member
     raw = _strip_think_tags(raw)
     # Garbage response fallback: empty or very short after stripping
     if not raw or len(raw) < 10:
@@ -131,11 +133,11 @@ def _count_parameters(node: CodeNode) -> int:
     if not node.source or not node.language:
         return 0
 
-    import tree_sitter_language_pack as tslp
+    import tree_sitter_language_pack as tslp  # pylint: disable=import-outside-toplevel  # noqa: E501
 
     try:
-        parser = tslp.get_parser(node.language)
-    except Exception:
+        parser = tslp.get_parser(node.language)  # type: ignore[arg-type]
+    except (KeyError, ValueError):
         return 0
 
     tree = parser.parse(node.source.encode())
@@ -174,6 +176,7 @@ def _count_parameters(node: CodeNode) -> int:
 
 
 def _worst_quality(a: str, b: str) -> str:
+    """Return the worse of two quality labels."""
     order = {"clean": 0, "complex": 1, "warning": 2}
     return a if order.get(a, 0) >= order.get(b, 0) else b
 
@@ -196,7 +199,7 @@ def _score_quality(
     # Radon complexity for Python
     if node.language == "python" and node.source:
         try:
-            from radon.complexity import cc_visit, cc_rank
+            from radon.complexity import cc_visit, cc_rank  # type: ignore[import-untyped]  # pylint: disable=import-outside-toplevel  # noqa: E501
 
             blocks = cc_visit(node.source)
             if blocks:
@@ -206,11 +209,17 @@ def _score_quality(
                     pass  # clean
                 elif rank == "C":
                     quality = _worst_quality(quality, "complex")
-                    warnings.append(f"Moderate complexity (grade {rank}, score {worst})")
+                    warnings.append(
+                        f"Moderate complexity (grade {rank},"
+                        f" score {worst})"
+                    )
                 else:
                     quality = _worst_quality(quality, "warning")
-                    warnings.append(f"High complexity (grade {rank}, score {worst})")
-        except Exception:
+                    warnings.append(
+                        f"High complexity (grade {rank},"
+                        f" score {worst})"
+                    )
+        except (ImportError, AttributeError):  # nosec B110
             pass
 
     # Line-count check (two-tier: yellow/red)
@@ -219,7 +228,10 @@ def _score_quality(
         yellow, red = thresholds
         if node.line_count > red:
             quality = _worst_quality(quality, "warning")
-            warnings.append(f"This {node.node_type} is {node.line_count} lines long")
+            warnings.append(
+                f"This {node.node_type} is"
+                f" {node.line_count} lines long"
+            )
         elif node.line_count > yellow:
             quality = _worst_quality(quality, "complex")
             warnings.append(f"Long {node.node_type}: {node.line_count} lines")
@@ -239,7 +251,6 @@ def _summarize_directory(node: CodeNode) -> None:
     if node.node_type != "directory":
         return
 
-    child_names = [c.name for c in node.children]
     file_children = [c for c in node.children if c.node_type == "file"]
     dir_children = [c for c in node.children if c.node_type == "directory"]
 
@@ -251,7 +262,9 @@ def _summarize_directory(node: CodeNode) -> None:
         names = ", ".join(c.name for c in dir_children)
         parts.append(f"{len(dir_children)} directories: {names}")
 
-    node.summary = f"Contains {'; '.join(parts)}" if parts else "Empty directory"
+    node.summary = (
+        f"Contains {'; '.join(parts)}" if parts else "Empty directory"
+    )
 
     # Quality = worst child quality with descriptive rollup
     quality_order = {"warning": 2, "complex": 1, "clean": 0}
@@ -260,9 +273,11 @@ def _summarize_directory(node: CodeNode) -> None:
     complex_count = 0
     warning_count = 0
     for child in node.children:
-        if child.quality and quality_order.get(child.quality, 0) > quality_order.get(
-            worst, 0
-        ):
+        child_rank = quality_order.get(
+            child.quality or "clean", 0
+        )
+        worst_rank = quality_order.get(worst, 0)
+        if child.quality and child_rank > worst_rank:
             worst = child.quality
         if child.quality == "complex":
             complex_count += 1
@@ -289,7 +304,10 @@ def _rollup_quality(node: CodeNode) -> None:
     own_warnings = list(node.warnings) if node.warnings else []
     complex_count = sum(1 for c in node.children if c.quality == "complex")
     warning_count = sum(1 for c in node.children if c.quality == "warning")
-    worst_child = "warning" if warning_count else ("complex" if complex_count else "clean")
+    worst_child = (
+        "warning" if warning_count
+        else ("complex" if complex_count else "clean")
+    )
     if quality_order[worst_child] > quality_order.get(own_quality, 0):
         node.quality = worst_child
     if warning_count:
@@ -308,14 +326,16 @@ def _rollup_quality(node: CodeNode) -> None:
 
 def _cache_key(node: CodeNode) -> str:
     """Generate a cache key based on filepath, name, and source hash."""
-    source_hash = hashlib.md5(node.source.encode()).hexdigest()
+    source_hash = hashlib.md5(
+        node.source.encode(), usedforsecurity=False
+    ).hexdigest()
     return f"{node.filepath}::{node.name}::{source_hash}"
 
 
 def _load_cache(path: str) -> dict:
     """Load cache from JSON file."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict) and data.get("version") == 1:
             return data
@@ -327,7 +347,7 @@ def _load_cache(path: str) -> dict:
 def _save_cache(path: str, data: dict) -> None:
     """Save cache to JSON file."""
     try:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except OSError as e:
         print(f"Warning: could not save cache: {e}", file=sys.stderr)
@@ -347,7 +367,9 @@ def assign_node_ids(root: CodeNode) -> dict[str, CodeNode]:
 
     def _walk(node: CodeNode, path_parts: list[str]) -> None:
         key = "::".join(path_parts)
-        node_id = hashlib.md5(key.encode()).hexdigest()[:12]
+        node_id = hashlib.md5(
+            key.encode(), usedforsecurity=False
+        ).hexdigest()[:12]
         node.node_id = node_id
         lookup[node_id] = node
         for child in node.children:
@@ -407,7 +429,7 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
         node.pseudocode = pseudocode
         cache["entries"][key] = {"summary": summary, "pseudocode": pseudocode}
         _save_cache(cache_path, cache)
-    except Exception as e:
+    except (ConnectionError, RuntimeError, ValueError, OSError) as e:
         node.summary = f"Summary generation failed: {e}"
 
 
@@ -416,7 +438,9 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _collect_nodes(node: CodeNode, depth: int = 0) -> list[tuple[CodeNode, int]]:
+def _collect_nodes(
+    node: CodeNode, depth: int = 0,
+) -> list[tuple[CodeNode, int]]:
     """Collect all nodes with their depth for priority batching."""
     result = [(node, depth)]
     for child in node.children:
@@ -424,7 +448,11 @@ def _collect_nodes(node: CodeNode, depth: int = 0) -> list[tuple[CodeNode, int]]
     return result
 
 
-def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeNode:
+def analyze(  # pylint: disable=too-many-locals,too-many-statements
+    root: CodeNode,
+    model: str = "qwen3:14b",
+    workers: int = 1,
+) -> CodeNode:
     """Analyze the full tree with AI summaries and quality scoring.
 
     Uses priority batching:
@@ -490,7 +518,7 @@ def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeN
                     "summary": summary,
                     "pseudocode": pseudocode,
                 }
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             node.summary = "Summary generation failed"
             print(
                 f"  AI error for {label}: {e}",
@@ -505,7 +533,10 @@ def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeN
             node.warnings = warnings
 
         # Phase 1b: Rollup quality to files and classes (deepest first)
-        rollup_nodes = [(n, d) for n, d in all_nodes if n.node_type in ("file", "class")]
+        rollup_nodes = [
+            (n, d) for n, d in all_nodes
+            if n.node_type in ("file", "class")
+        ]
         rollup_nodes.sort(key=lambda x: x[1], reverse=True)
         for node, _depth in rollup_nodes:
             _rollup_quality(node)
@@ -543,7 +574,8 @@ def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeN
     except ConnectionError as e:
         print(
             f"\nError: Could not connect to ollama: {e}\n"
-            "Make sure ollama is running (ollama serve), or use --no-ai to skip AI analysis.",
+            "Make sure ollama is running (ollama serve),"
+            " or use --no-ai to skip AI analysis.",
             file=sys.stderr,
         )
         sys.exit(1)

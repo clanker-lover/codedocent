@@ -12,7 +12,9 @@ from codedocent.scanner import ScannedFile
 
 
 @dataclass
-class CodeNode:
+class CodeNode:  # pylint: disable=too-many-instance-attributes
+    """Represents a node in the parsed code tree."""
+
     name: str
     node_type: str  # 'directory' | 'file' | 'class' | 'function' | 'method'
     language: str | None
@@ -65,6 +67,7 @@ _METHOD_TYPES: dict[str, dict[str, str]] = {
 
 
 def _rules_for(language: str) -> dict[str, tuple[str, str]]:
+    """Return AST extraction rules for the given language."""
     if language == "python":
         return _PYTHON_RULES
     if language in ("javascript", "typescript", "tsx"):
@@ -106,6 +109,7 @@ def _extract_imports_js(root_node) -> list[str]:
 
 
 def _extract_imports(root_node, language: str) -> list[str]:
+    """Dispatch import extraction by language."""
     if language == "python":
         return _extract_imports_python(root_node)
     if language in ("javascript", "typescript", "tsx"):
@@ -201,14 +205,16 @@ def _extract_methods(class_node, language: str) -> list[CodeNode]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse_file(filepath: str, language: str, source: str | None = None) -> CodeNode:
+def parse_file(  # pylint: disable=too-many-locals
+    filepath: str, language: str, source: str | None = None,
+) -> CodeNode:
     """Parse a single source file and return a file-level CodeNode.
 
     If *source* is provided it is used directly; otherwise the file is read
     from disk.
     """
     if source is None:
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             source = f.read()
 
     source_bytes = source.encode()
@@ -233,8 +239,8 @@ def parse_file(filepath: str, language: str, source: str | None = None) -> CodeN
         return file_node
 
     try:
-        parser = tslp.get_parser(language)
-    except Exception:
+        parser = tslp.get_parser(language)  # type: ignore[arg-type]
+    except (KeyError, ValueError):
         return file_node
 
     tree = parser.parse(source_bytes)
@@ -254,7 +260,9 @@ def parse_file(filepath: str, language: str, source: str | None = None) -> CodeN
                 filepath=filepath,
                 start_line=child.start_point[0] + 1,
                 end_line=child.end_point[0] + 1,
-                source=child.text.decode(),
+                source=(
+                    child.text.decode() if child.text else ""
+                ),
                 line_count=child.end_point[0] - child.start_point[0] + 1,
             )
             # If it's a class, extract methods as children
@@ -276,7 +284,10 @@ def parse_file(filepath: str, language: str, source: str | None = None) -> CodeN
     return file_node
 
 
-def parse_directory(scanned_files: list[ScannedFile], root: str | None = None) -> CodeNode:
+def parse_directory(  # pylint: disable=too-many-locals
+    scanned_files: list[ScannedFile],
+    root: str | None = None,
+) -> CodeNode:
     """Build a full tree with directory nodes from scanner output.
 
     *root* is the base directory path. If not provided, it's inferred from
@@ -333,7 +344,12 @@ def parse_directory(scanned_files: list[ScannedFile], root: str | None = None) -
 
     # Sort all directory children: dirs first, then files, alphabetically
     def _sort_children(node: CodeNode) -> None:
-        node.children.sort(key=lambda n: (0 if n.node_type == "directory" else 1, n.name))
+        node.children.sort(
+            key=lambda n: (
+                0 if n.node_type == "directory" else 1,
+                n.name,
+            )
+        )
         for child in node.children:
             if child.node_type == "directory":
                 _sort_children(child)

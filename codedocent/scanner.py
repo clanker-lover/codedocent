@@ -56,13 +56,15 @@ SKIP_DIRS: set[str] = {
 
 @dataclass
 class ScannedFile:
+    """A source file discovered during directory scanning."""
+
     filepath: str
     language: str
     extension: str
 
 
 def _is_binary(filepath: str, sample_size: int = 8192) -> bool:
-    """Check if a file is binary by looking for null bytes in the first chunk."""
+    """Check if a file is binary by looking for null bytes."""
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(sample_size)
@@ -76,7 +78,7 @@ def _load_gitignore(root: str) -> pathspec.PathSpec | None:
     gitignore_path = os.path.join(root, ".gitignore")
     if not os.path.isfile(gitignore_path):
         return None
-    with open(gitignore_path) as f:
+    with open(gitignore_path, encoding="utf-8") as f:
         return pathspec.PathSpec.from_lines("gitignore", f)
 
 
@@ -100,9 +102,10 @@ def scan_directory(path: str | Path) -> list[ScannedFile]:
     results: list[ScannedFile] = []
 
     for dirpath, dirnames, filenames in os.walk(root):
-        # Filter out directories we should skip (modifying in-place prunes walk)
+        # Filter out directories we should skip (in-place prunes walk)
         dirnames[:] = [
-            d for d in dirnames if not _should_skip_dir(d) and not d.startswith(".")
+            d for d in dirnames
+            if not _should_skip_dir(d) and not d.startswith(".")
         ]
         dirnames.sort()
 
@@ -122,9 +125,11 @@ def scan_directory(path: str | Path) -> list[ScannedFile]:
             if _is_binary(filepath):
                 continue
 
-            results.append(
-                ScannedFile(filepath=rel_path, language=language, extension=ext)
-            )
+            results.append(ScannedFile(
+                filepath=rel_path,
+                language=language,
+                extension=ext,
+            ))
 
     results.sort(key=lambda f: f.filepath)
     return results

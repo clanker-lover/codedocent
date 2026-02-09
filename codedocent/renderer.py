@@ -67,12 +67,12 @@ def render_interactive(root: CodeNode) -> str:
 
     Embeds the tree as JSON for client-side rendering.
     """
-    from codedocent.server import _node_to_dict
+    from codedocent.server import _node_to_dict  # pylint: disable=import-outside-toplevel,cyclic-import  # noqa: E501
 
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(str(template_dir)),
-        autoescape=False,  # we embed raw JSON
+        autoescape=False,  # nosec B701 — we embed raw JSON
     )
     template = env.get_template("interactive.html")
     tree_json = json.dumps(_node_to_dict(root))
