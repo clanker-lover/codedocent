@@ -73,19 +73,6 @@ codedocent /path/to/code --text
 
 ---
 
-## Models
-
-Any Ollama model works. Tested recommendations:
-
-| Model | Size | Speed | Quality |
-|-------|------|-------|---------|
-| `gemma3:4b` | 3 GB | 1-3 sec | Good |
-| `qwen3:8b` | 5 GB | 3-8 sec | Better |
-| `qwen3:14b` | 9 GB | 5-15 sec | Very good |
-| `qwen3:32b` | 20 GB | 30-60 sec | Best |
-
----
-
 ## Supported Languages
 
 **Full parsing:** Python, JavaScript, TypeScript
@@ -122,4 +109,3 @@ Full mode analyzes every block in priority order and outputs a standalone HTML f
 ## License
 
 MIT
-Early development. Issues and ideas welcome.
