@@ -2,110 +2,133 @@
 
 **Code visualization for non-programmers.**
 
-A docent is a guide who explains complex things to non-experts. Codedocent does that for code.
+A docent is a guide who explains things to people who aren't experts. Codedocent does that for code.
+
+> Google Translate for code → human understanding.
 
 ---
 
 ## What it does
 
-Codedocent transforms any codebase into an interactive visual map. No programming knowledge required.
+Codedocent takes any codebase and turns it into a visual, navigable map that anyone can read — no programming knowledge required.
 
-Each piece of code becomes a **block** containing:
-- A plain English explanation of what it does
-- A pseudocode translation (logic without syntax)
-- Quality warnings (complexity, security, style)
-- The actual source code (hidden by default)
+Every piece of code becomes a **block** that shows:
+- A **plain English explanation** of what it does
+- A **pseudocode translation** (simplified logic, not real syntax)
+- **Quality warnings** (complexity, security, style issues)
+- The **actual source code** (hidden by default, expandable)
 
-Blocks are nested like a schematic — directories contain files, files contain classes, classes contain functions. Click to drill down. Breadcrumbs to navigate back up.
-
----
+Blocks are **nested** — directories contain files, files contain classes, classes contain functions. Click to drill down. Breadcrumbs to navigate back up. Color-coded by language.
 
 ## Who it's for
 
-Project managers, founders, designers, analysts, auditors — anyone who needs to understand a codebase without learning to code.
+You understand systems. You can read a schematic. You just can't read Python.
 
----
+Codedocent is for project managers, founders, designers, analysts, auditors — anyone who needs to understand what a codebase does without learning to code.
 
-## Installation
+## Quick start
 
-**Requirements:**
+### Requirements
+
 - Python 3.10+
-- [Ollama](https://ollama.com) (runs AI models locally)
+- [Ollama](https://ollama.com) installed and running
+- A model pulled (e.g., `ollama pull gemma3:4b`)
+
+### Install
 ```bash
 git clone https://github.com/clanker-lover/codedocent.git
 cd codedocent
 pip install -e .
-ollama pull gemma3:4b
 ```
 
----
+### Run
 
-## Usage
-
-**Interactive mode** (default) — opens in browser, analyzes on-demand:
+**Interactive mode** (recommended) — instant load, AI analyzes each block on click:
 ```bash
-codedocent /path/to/code
+codedocent /path/to/any/codebase
 ```
 
-**Full analysis** — analyzes everything upfront, outputs static HTML:
+Your browser opens automatically. Click any block to drill down and trigger AI analysis.
+
+**Full analysis mode** — analyzes everything upfront, outputs a static HTML file:
 ```bash
-codedocent /path/to/code --full
+codedocent /path/to/any/codebase --full
 ```
 
-**Text outline** — quick structure view, no AI:
+**Text mode** — quick tree overview, no AI:
 ```bash
-codedocent /path/to/code --text
+codedocent /path/to/any/codebase --text
 ```
 
----
-
-## Options
+### Options
 
 | Flag | Description |
 |------|-------------|
-| `--full` | Analyze all blocks upfront, save as HTML |
-| `--text` | Print text outline only |
-| `--no-ai` | Show structure without AI analysis |
-| `--model NAME` | Select Ollama model (default: gemma3:4b) |
-| `--workers N` | Parallel AI requests for `--full` mode |
-| `--port PORT` | Set server port for interactive mode |
-| `--output FILE` | Set output filename for `--full` mode |
+| `--full` | Analyze everything upfront, output static HTML |
+| `--text` | Print text tree to terminal (no browser) |
+| `--no-ai` | Skip AI summaries, show structure only |
+| `--model MODEL` | Ollama model to use (default: `qwen3:14b`) |
+| `--port PORT` | Port for interactive server (default: auto) |
+| `--workers N` | Parallel AI workers for `--full` mode (default: 1) |
+| `--output FILE` | Output filename for `--full` mode |
 
----
+## Supported languages
 
-## Supported Languages
+Codedocent detects **23 file extensions** across these languages. Python and JavaScript/TypeScript get full AST parsing (functions, classes, methods, imports). All other languages get file-level analysis.
 
-**Full parsing:** Python, JavaScript, TypeScript
-
-**File-level analysis:** C, C++, Rust, Go, Java, Ruby, PHP, Swift, Kotlin, Scala, HTML, CSS, JSON, YAML, TOML (23 extensions total)
-
----
+| Full parsing | File-level detection |
+|-------------|---------------------|
+| Python (.py) | C / C++ (.c, .cpp, .h, .hpp) |
+| JavaScript (.js) | Rust (.rs) |
+| TypeScript (.ts, .tsx) | Go (.go) |
+| | Java (.java) |
+| | Ruby (.rb) |
+| | PHP (.php) |
+| | Swift (.swift) |
+| | Kotlin (.kt) |
+| | Scala (.scala) |
+| | HTML / CSS |
+| | Config files (JSON, YAML, TOML) |
 
 ## How it works
 
-All AI runs locally through Ollama. Your code never leaves your machine.
+**Interactive mode** starts a local server and opens your browser. The code tree loads instantly. When you click a block, it calls Ollama to analyze just that node — typically 1-2 seconds with a 4B model.
 
-Interactive mode starts a local server and opens your browser. The code tree loads instantly. Clicking a block triggers on-demand AI analysis.
+**Full mode** analyzes every node in priority order (directories → files → functions), with an optional `--workers` flag for parallel AI requests. Outputs a self-contained HTML file you can share.
 
-Full mode analyzes every block in priority order and outputs a standalone HTML file.
+All AI runs locally via Ollama. No data leaves your machine.
 
----
+## AI models
 
-## Status
+Codedocent works with any model from the [Ollama library](https://ollama.com/library).
 
-**Phase 4 of 8 complete.**
+## Quality indicators
 
-✅ Scanner, parser, renderer, analyzer, server, CLI  
-✅ 50 tests passing  
-✅ Interactive navigation with lazy analysis  
-✅ Static full-analysis mode with parallel workers  
+Each block shows a quality badge based on static analysis:
 
-🔲 Code export for AI assistance  
-🔲 Surgical code replacement  
-🔲 pip packaging  
+| Badge | Meaning |
+|-------|---------|
+| 🟢 Clean | Low complexity, no warnings |
+| 🟡 Complex | Moderate complexity or style warnings |
+| 🔴 Warning | High complexity, many issues |
 
----
+## Current status
+
+**Phase 4 of 8 complete — working MVP.**
+
+- ✅ Scanner, parser, renderer, analyzer, server, CLI — all built and tested
+- ✅ 50 tests passing
+- ✅ Interactive navigation with lazy AI analysis
+- ✅ Static HTML full-analysis mode
+- ✅ Parallel workers for batch analysis
+- 🔲 Code export (Phase 5)
+- 🔲 Code replacement (Phase 7)
+- 🔲 pip packaging (Phase 8)
 
 ## License
 
 MIT
+
+## Contributing
+
+This project is in active early development. Issues and ideas welcome.
