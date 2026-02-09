@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import signal
+import socket
 import socketserver
 import threading
 import time
@@ -58,8 +59,6 @@ def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
 
 def _find_open_port(start: int = 8420) -> int:
     """Find an available port starting from *start*."""
-    import socket  # pylint: disable=import-outside-toplevel
-
     for port in range(start, start + 100):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -136,7 +135,9 @@ def _analyze_node(node_id: str) -> dict | None:
     return _node_to_dict(node, include_source=True)
 
 
-def _execute_replace(node_id: str, body: dict) -> tuple[int, dict]:
+def _execute_replace(  # pylint: disable=too-many-return-statements
+    node_id: str, body: dict,
+) -> tuple[int, dict]:
     """Validate and execute a source-replacement request.
 
     Returns ``(status_code, result_dict)``.
@@ -174,6 +175,17 @@ def _execute_replace(node_id: str, body: dict) -> tuple[int, dict]:
             _update_node_after_replace(
                 node, new_source, result, _Handler.cache_dir,
             )
+    if not result["success"]:
+        err = result.get("error", "")
+        if "modified externally" in err:
+            return (409, result)
+        if any(k in err for k in (
+            "Invalid line range", "exceeds file length",
+            "not valid UTF-8", "must be a string",
+            "File not found",
+        )):
+            return (400, result)
+        return (500, result)
     return (200, result)
 
 
@@ -275,8 +287,19 @@ class _Handler(BaseHTTPRequestHandler):
                       "error": "Request body too large"},
             )
             return
+        self.connection.settimeout(30)
         try:
-            body = json.loads(self.rfile.read(content_length))
+            raw = self.rfile.read(content_length)
+        except socket.timeout:
+            self._send_json(
+                408,
+                {"success": False, "error": "Request body read timed out"},
+            )
+            return
+        finally:
+            self.connection.settimeout(None)
+        try:
+            body = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             self._send_json(400, {"success": False, "error": "Invalid JSON"})
             return
@@ -314,11 +337,8 @@ def _setup_handler_state(
     from codedocent.renderer import render_interactive  # pylint: disable=import-outside-toplevel  # noqa: E501
 
     _Handler.csrf_token = secrets.token_urlsafe(32)
-    _Handler.html_content = render_interactive(root)
-    _Handler.html_content = _Handler.html_content.replace(
-        '<meta charset="utf-8">',
-        '<meta charset="utf-8">\n'
-        '<meta name="csrf-token" content="' + _Handler.csrf_token + '">',
+    _Handler.html_content = render_interactive(
+        root, csrf_token=_Handler.csrf_token,
     )
     _Handler.root = root
     _Handler.node_lookup = node_lookup

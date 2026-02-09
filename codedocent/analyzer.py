@@ -115,16 +115,19 @@ def _summarize_with_ai(
     Returns ``None`` if the AI call times out.
     """
     prompt = _build_prompt(node, model)
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(
+        ollama.chat,
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+    )
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                ollama.chat,
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            response = future.result(timeout=_AI_TIMEOUT)
+        response = future.result(timeout=_AI_TIMEOUT)
     except TimeoutError:
+        future.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
         return None
+    pool.shutdown(wait=False)
     raw = response.message.content or ""  # pylint: disable=no-member
     raw = _strip_think_tags(raw)
     # Garbage response fallback: empty or very short after stripping

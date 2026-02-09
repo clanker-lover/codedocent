@@ -158,8 +158,9 @@ def test_backup_is_timestamped(tmp_path: Path) -> None:
     assert len(bak_files) == 1
     # Extract timestamp suffix after ".bak."
     suffix = bak_files[0].rsplit(".bak.", 1)[1]
-    assert len(suffix) == 15  # YYYYMMDDTHHMMSS
+    assert len(suffix) == 22  # YYYYMMDDTHHMMSS.uuuuuu
     assert suffix[8] == "T"
+    assert suffix[15] == "."
 
 
 def test_multiple_saves_create_multiple_backups(tmp_path: Path) -> None:
@@ -206,14 +207,24 @@ def test_crlf_line_endings_preserved(tmp_path: Path) -> None:
 
 
 def test_backup_verification_failure(tmp_path: Path) -> None:
-    """Fix 13: backup verification catches failed copy."""
+    """Fix 13: backup verification catches failed copy.
+
+    With O_EXCL backup creation, the placeholder file already exists
+    before copy2 runs, so patching copy2 to a no-op leaves a 0-byte
+    backup but os.path.exists() still returns True.  To trigger the
+    "Backup creation failed" path we must also remove the placeholder.
+    """
     p = _write_sample(tmp_path)
     lines, error, mtime, line_ending = _read_and_validate(str(p), 1, 5)
     assert lines is not None
 
     original = p.read_text(encoding="utf-8")
 
-    with patch("codedocent.editor.shutil.copy2"):
+    def _fake_copy2(src, dst):
+        # Remove the O_EXCL placeholder so exists() returns False
+        os.unlink(dst)
+
+    with patch("codedocent.editor.shutil.copy2", side_effect=_fake_copy2):
         with pytest.raises(OSError, match="Backup creation"):
             _write_with_backup(str(p), lines, mtime)
 
@@ -222,13 +233,13 @@ def test_backup_verification_failure(tmp_path: Path) -> None:
 
 
 def test_symlink_at_backup_path_removed(tmp_path: Path) -> None:
-    """Fix 14: symlink at backup path is removed before copy."""
+    """Fix 14: symlink at backup path triggers O_EXCL retry with .1 suffix."""
     p = _write_sample(tmp_path)
     original = p.read_text(encoding="utf-8")
 
     # Pin the timestamp so we know the backup path
     fixed_dt = "20260101T120000"
-    backup_path = str(p) + ".bak." + fixed_dt
+    backup_path = str(p) + ".bak." + fixed_dt + ".000000"
 
     # Create a symlink at the expected backup path
     target = tmp_path / "dangling_target"
@@ -239,14 +250,18 @@ def test_symlink_at_backup_path_removed(tmp_path: Path) -> None:
     with patch(
         "codedocent.editor.datetime",
     ) as mock_dt:
-        mock_dt.now.return_value.strftime.return_value = fixed_dt
+        mock_now = mock_dt.now.return_value
+        mock_now.strftime.return_value = fixed_dt
+        mock_now.microsecond = 0
         result = replace_block_source(str(p), 2, 2, "replaced\n")
 
     assert result["success"] is True
-    # Symlink should be replaced with a real file
-    assert not os.path.islink(backup_path)
-    assert os.path.isfile(backup_path)
-    assert Path(backup_path).read_text(encoding="utf-8") == original
+    # Symlink should be left untouched
+    assert os.path.islink(backup_path)
+    # Backup should land at the .1 suffix path
+    retry_path = backup_path + ".1"
+    assert os.path.isfile(retry_path)
+    assert Path(retry_path).read_text(encoding="utf-8") == original
 
 
 def test_lf_preserved_when_crlf_input(tmp_path: Path) -> None:

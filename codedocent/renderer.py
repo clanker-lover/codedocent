@@ -62,7 +62,9 @@ def render(root: CodeNode, output_path: str) -> None:
         f.write(html)
 
 
-def render_interactive(root: CodeNode) -> str:
+def render_interactive(  # nosec B107
+    root: CodeNode, csrf_token: str = "",
+) -> str:
     """Render *root* as interactive HTML string (served by localhost server).
 
     Embeds the tree as JSON for client-side rendering.
@@ -76,4 +78,4 @@ def render_interactive(root: CodeNode) -> str:
     )
     template = env.get_template("interactive.html")
     tree_json = json.dumps(_node_to_dict(root))
-    return template.render(tree_json=tree_json)
+    return template.render(tree_json=tree_json, csrf_token=csrf_token)

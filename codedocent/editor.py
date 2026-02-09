@@ -65,13 +65,30 @@ def _write_with_backup(
     if os.stat(filepath).st_mtime != mtime:
         raise OSError("File was modified externally since last read")
 
+    now = datetime.now()
     backup_path = (
         filepath + ".bak."
-        + datetime.now().strftime("%Y%m%dT%H%M%S")
+        + now.strftime("%Y%m%dT%H%M%S") + f".{now.microsecond:06d}"
     )
 
-    if os.path.islink(backup_path):
-        os.unlink(backup_path)
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd_bak = os.open(backup_path, flags, 0o600)
+        os.close(fd_bak)
+    except FileExistsError:
+        for i in range(1, 100):
+            candidate = backup_path + f".{i}"
+            try:
+                fd_bak = os.open(candidate, flags, 0o600)
+                os.close(fd_bak)
+                backup_path = candidate
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OSError("Cannot create unique backup path") from None
 
     shutil.copy2(filepath, backup_path)
 
@@ -93,6 +110,8 @@ def _write_with_backup(
         fd.flush()
         os.fsync(fd.fileno())
         fd.close()
+        orig_mode = os.stat(filepath).st_mode
+        os.chmod(tmp_path, orig_mode)
         os.replace(tmp_path, filepath)
     except BaseException:
         fd.close()
