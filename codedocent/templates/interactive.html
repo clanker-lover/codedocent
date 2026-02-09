@@ -293,7 +293,21 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-imports-label);
-    margin-bottom: 4px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.cd-imports__label::-webkit-details-marker {
+    display: none;
+}
+
+.cd-imports__label::before {
+    content: "▶ ";
+    font-size: 9px;
+}
+
+.cd-imports[open] > .cd-imports__label::before {
+    content: "▼ ";
 }
 
 .cd-imports__item {
@@ -827,9 +841,9 @@ function renderNode(node, depth) {
 
     // Imports
     if (node.imports && node.imports.length > 0) {
-        const imp = document.createElement('div');
+        const imp = document.createElement('details');
         imp.className = 'cd-imports';
-        imp.innerHTML = '<div class="cd-imports__label">IMPORTS</div>' +
+        imp.innerHTML = '<summary class="cd-imports__label">IMPORTS (' + node.imports.length + ')</summary>' +
             node.imports.map(i => '<div class="cd-imports__item">\u2192 ' + escapeHtml(i) + '</div>').join('');
         body.appendChild(imp);
     }

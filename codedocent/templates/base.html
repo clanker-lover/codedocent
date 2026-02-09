@@ -240,7 +240,21 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-imports-label);
-    margin-bottom: 4px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.cd-imports__label::-webkit-details-marker {
+    display: none;
+}
+
+.cd-imports__label::before {
+    content: "▶ ";
+    font-size: 9px;
+}
+
+.cd-imports[open] > .cd-imports__label::before {
+    content: "▼ ";
 }
 
 .cd-imports__item {
@@ -398,12 +412,12 @@ body {
     </div>
     <div class="cd-node__body">
         {% if node.imports %}
-        <div class="cd-imports">
-            <div class="cd-imports__label">IMPORTS</div>
+        <details class="cd-imports">
+            <summary class="cd-imports__label">IMPORTS ({{ node.imports | length }})</summary>
             {% for imp in node.imports %}
             <div class="cd-imports__item">→ {{ imp }}</div>
             {% endfor %}
-        </div>
+        </details>
         {% endif %}
         {% if node.summary %}
         <div class="cd-summary">{{ node.summary }}</div>
