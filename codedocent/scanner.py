@@ -107,12 +107,16 @@ def scan_directory(path: str | Path) -> list[ScannedFile]:
         # Filter out directories we should skip (in-place prunes walk)
         dirnames[:] = [
             d for d in dirnames
-            if not _should_skip_dir(d) and not d.startswith(".")
+            if not _should_skip_dir(d)
+            and not d.startswith(".")
+            and not os.path.islink(os.path.join(dirpath, d))
         ]
         dirnames.sort()
 
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
+            if os.path.islink(filepath):
+                continue
             if not os.path.isfile(filepath):
                 continue
             rel_path = os.path.relpath(filepath, root)

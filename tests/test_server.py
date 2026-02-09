@@ -139,7 +139,7 @@ def server_fixture(tmp_path):
 
     from codedocent.server import _find_open_port, start_server
 
-    port = _find_open_port(9100)
+    port = _find_open_port()
 
     thread = threading.Thread(
         target=start_server,

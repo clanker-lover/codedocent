@@ -8,6 +8,7 @@ import secrets
 import signal
 import socket
 import socketserver
+import sys
 import threading
 import time
 import webbrowser
@@ -57,16 +58,11 @@ def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
     return d
 
 
-def _find_open_port(start: int = 8420) -> int:
-    """Find an available port starting from *start*."""
-    for port in range(start, start + 100):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    raise RuntimeError("Could not find an open port")
+def _find_open_port() -> int:
+    """Ask the OS for a free port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def _resolve_filepath(node: CodeNode, cache_dir: str) -> str:
@@ -101,6 +97,35 @@ def _update_node_after_replace(
     cache = _load_cache(cache_path)
     cache.get("entries", {}).pop(old_key, None)
     _save_cache(cache_path, cache)
+
+
+def _refresh_file_nodes(node: CodeNode) -> None:
+    """Re-parse the file containing *node*, updating all sibling nodes."""
+    from codedocent.parser import parse_file  # pylint: disable=import-outside-toplevel
+    from codedocent.analyzer import assign_node_ids  # pylint: disable=import-outside-toplevel
+
+    # Find the file node that owns this code node
+    file_node: CodeNode | None = None
+    for n in _Handler.node_lookup.values():
+        if n.node_type == "file" and n.filepath == node.filepath:
+            file_node = n
+            break
+    if file_node is None:
+        return
+
+    abs_path = _resolve_filepath(file_node, _Handler.cache_dir)
+    new_file = parse_file(abs_path, file_node.language or "")
+
+    # Update the existing file node in-place (keeps tree references intact)
+    file_node.source = new_file.source
+    file_node.children = new_file.children
+    file_node.imports = new_file.imports
+    file_node.line_count = new_file.line_count
+    file_node.end_line = new_file.end_line
+
+    # Rebuild the full node_lookup (IDs are deterministic, so unchanged
+    # nodes keep their IDs; the browser's existing references stay valid)
+    _Handler.node_lookup = assign_node_ids(_Handler.root)
 
 
 def _start_idle_watcher(
@@ -175,6 +200,7 @@ def _execute_replace(  # pylint: disable=too-many-return-statements
             _update_node_after_replace(
                 node, new_source, result, _Handler.cache_dir,
             )
+            _refresh_file_nodes(node)
     if not result["success"]:
         err = result.get("error", "")
         if "modified externally" in err:
@@ -303,7 +329,12 @@ class _Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, ValueError):
             self._send_json(400, {"success": False, "error": "Invalid JSON"})
             return
-        status, result = _execute_replace(node_id, body)
+        try:
+            status, result = _execute_replace(node_id, body)
+        except Exception:
+            print(f"replace error: {sys.exc_info()[1]}", file=sys.stderr, flush=True)
+            self._send_json(500, {"success": False, "error": "Internal server error"})
+            return
         if status == 404:
             self.send_error(404, result["error"])
             return
