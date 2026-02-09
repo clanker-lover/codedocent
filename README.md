@@ -15,6 +15,7 @@ Codedocent takes any codebase and turns it into a visual, navigable map that any
 Every piece of code becomes a **block** that shows:
 - A **plain English explanation** of what it does
 - A **pseudocode translation** (simplified logic, not real syntax)
+- **Collapsible imports** with a count label (e.g., `IMPORTS (14)`) — click to expand
 - **Quality warnings** with explanatory text (complexity, line count, parameter count)
 - The **actual source code** (hidden by default, expandable)
 
@@ -171,7 +172,7 @@ codedocent/
 - Code replacement with `.bak` backup and cache invalidation
 - Quality scoring with two-tier thresholds and warning rollup across the tree
 - pip-installable package with `codedocent` and `codedocent-gui` CLI entry points
-- 93 tests passing
+- 96 tests passing
 - Code quality: pylint 10/10, bandit/flake8/mypy all clean
 
 ## License
