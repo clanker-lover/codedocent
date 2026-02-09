@@ -188,7 +188,7 @@ def test_cache_creates_file(mock_ollama, tmp_path):
     )
     mock_ollama.chat.return_value = mock_response
 
-    node = _make_func_node()
+    node = _make_func_node(source="def add(a, b):\n    result = a + b\n    return result\n")
     node.filepath = str(tmp_path / "test.py")
     root = _make_dir_node(
         name="proj", children=[node], filepath=str(tmp_path)
@@ -214,7 +214,7 @@ def test_cache_prevents_duplicate_calls(mock_ollama, tmp_path):
     )
     mock_ollama.chat.return_value = mock_response
 
-    node = _make_func_node()
+    node = _make_func_node(source="def add(a, b):\n    result = a + b\n    return result\n")
     node.filepath = str(tmp_path / "test.py")
     root = _make_dir_node(
         name="proj", children=[node], filepath=str(tmp_path)
@@ -282,3 +282,123 @@ def test_analyze_no_ai_skips_ollama(mock_ollama, tmp_path):
     mock_ollama.chat.assert_not_called()
     assert node.quality is not None
     assert node.summary is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: New tests
+# ---------------------------------------------------------------------------
+
+
+def test_strip_think_tags_pipe_variant():
+    from codedocent.analyzer import _strip_think_tags
+
+    text = "<|think|>internal thoughts here<|/think|>SUMMARY: hello"
+    result = _strip_think_tags(text)
+    assert "<|think|>" not in result
+    assert "SUMMARY: hello" in result
+
+
+def test_strip_think_tags_unclosed():
+    from codedocent.analyzer import _strip_think_tags
+
+    text = "SUMMARY: hello<think>trailing thoughts that never close"
+    result = _strip_think_tags(text)
+    assert "<think>" not in result
+    assert "SUMMARY: hello" in result
+
+
+def test_assign_node_ids():
+    from codedocent.analyzer import assign_node_ids
+
+    tree = _make_tree()
+    lookup = assign_node_ids(tree)
+
+    # All nodes should have IDs
+    assert tree.node_id is not None
+    assert len(tree.node_id) == 12
+
+    # Lookup should contain all nodes
+    assert len(lookup) > 0
+    for node_id, node in lookup.items():
+        assert node.node_id == node_id
+        assert len(node_id) == 12
+
+    # IDs should be deterministic
+    tree2 = _make_tree()
+    lookup2 = assign_node_ids(tree2)
+    assert set(lookup.keys()) == set(lookup2.keys())
+
+
+@patch("codedocent.analyzer.ollama")
+def test_analyze_single_node(mock_ollama, tmp_path):
+    from codedocent.analyzer import analyze_single_node
+
+    mock_response = MagicMock()
+    mock_response.message.content = (
+        "SUMMARY: Adds two numbers.\nPSEUDOCODE:\nadd a and b"
+    )
+    mock_ollama.chat.return_value = mock_response
+
+    node = _make_func_node(source="def add(a, b):\n    result = a + b\n    return result\n")
+    node.filepath = str(tmp_path / "test.py")
+
+    analyze_single_node(node, "test-model", str(tmp_path))
+
+    assert node.summary is not None
+    assert "Adds two numbers" in node.summary
+    assert node.quality is not None
+    mock_ollama.chat.assert_called_once()
+
+
+@patch("codedocent.analyzer.ollama")
+def test_skip_small_files_in_analyze(mock_ollama, tmp_path):
+    from codedocent.analyzer import analyze
+
+    mock_response = MagicMock()
+    mock_response.message.content = (
+        "SUMMARY: Something.\nPSEUDOCODE:\ndo something"
+    )
+    mock_ollama.chat.return_value = mock_response
+
+    # A 2-line function (below MIN_LINES_FOR_AI=3)
+    small_node = _make_func_node(
+        name="tiny", source="def tiny():\n    pass\n"
+    )
+    small_node.filepath = str(tmp_path / "test.py")
+    small_node.line_count = 2
+
+    root = _make_dir_node(
+        name="proj", children=[small_node], filepath=str(tmp_path)
+    )
+
+    analyze(root, model="test-model")
+
+    # Small node should get descriptive summary, no AI call
+    assert "Small" in small_node.summary
+    assert small_node.line_count < 3
+    mock_ollama.chat.assert_not_called()
+
+
+@patch("codedocent.analyzer.ollama")
+def test_garbage_response_fallback(mock_ollama, tmp_path):
+    from codedocent.analyzer import analyze
+
+    # Return garbage (too short after stripping)
+    mock_response = MagicMock()
+    mock_response.message.content = "<think>long thoughts</think>hi"
+    mock_ollama.chat.return_value = mock_response
+
+    node = _make_func_node(
+        source="def add(a, b):\n    return a + b\n    # extra line\n"
+    )
+    node.filepath = str(tmp_path / "test.py")
+    node.line_count = 3
+
+    root = _make_dir_node(
+        name="proj", children=[node], filepath=str(tmp_path)
+    )
+
+    analyze(root, model="test-model")
+
+    # Should get fallback summary
+    assert node.summary == "Could not generate summary"

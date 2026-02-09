@@ -28,6 +28,7 @@ class CodeNode:
     pseudocode: str | None = None
     quality: str | None = None  # 'clean' | 'complex' | 'warning'
     warnings: list[str] | None = None
+    node_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

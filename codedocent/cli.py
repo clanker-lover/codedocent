@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from codedocent.parser import CodeNode, parse_directory
 from codedocent.scanner import scan_directory
@@ -57,26 +58,64 @@ def main() -> None:
         action="store_true",
         help="Skip AI analysis, render with placeholders",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Analyze everything upfront (priority-batched), write static HTML",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port for the interactive server (default: auto-select from 8420)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of parallel AI workers for --full mode (default: 1)",
+    )
 
     args = parser.parse_args()
 
     scanned = scan_directory(args.path)
     tree = parse_directory(scanned, root=args.path)
 
-    from codedocent.analyzer import analyze, analyze_no_ai
-
-    if args.no_ai:
-        analyze_no_ai(tree)
-    else:
-        analyze(tree, model=args.model)
-
     if args.text:
+        # Text mode: quality score only, print tree
+        from codedocent.analyzer import analyze_no_ai
+
+        analyze_no_ai(tree)
         print_tree(tree)
-    else:
+    elif args.no_ai:
+        # No-AI mode: quality score only, static HTML
+        from codedocent.analyzer import analyze_no_ai
         from codedocent.renderer import render
 
+        analyze_no_ai(tree)
         render(tree, args.output)
         print(f"HTML output written to {args.output}")
+    elif args.full:
+        # Full mode: upfront AI analysis, static HTML
+        from codedocent.analyzer import analyze
+        from codedocent.renderer import render
+
+        analyze(tree, model=args.model, workers=args.workers)
+        render(tree, args.output)
+        print(f"HTML output written to {args.output}")
+    else:
+        # Default lazy mode: interactive server
+        from codedocent.analyzer import analyze_no_ai, assign_node_ids
+        from codedocent.server import start_server
+
+        analyze_no_ai(tree)
+        node_lookup = assign_node_ids(tree)
+        start_server(
+            tree,
+            node_lookup,
+            model=args.model,
+            port=args.port,
+        )
 
 
 if __name__ == "__main__":

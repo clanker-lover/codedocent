@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -59,3 +60,20 @@ def render(root: CodeNode, output_path: str) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
+
+
+def render_interactive(root: CodeNode) -> str:
+    """Render *root* as interactive HTML string (served by localhost server).
+
+    Embeds the tree as JSON for client-side rendering.
+    """
+    from codedocent.server import _node_to_dict
+
+    template_dir = Path(__file__).parent / "templates"
+    env = Environment(
+        loader=FileSystemLoader(str(template_dir)),
+        autoescape=False,  # we embed raw JSON
+    )
+    template = env.get_template("interactive.html")
+    tree_json = json.dumps(_node_to_dict(root))
+    return template.render(tree_json=tree_json)

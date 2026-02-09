@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>codedocent — interactive</title>
+<style>
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #F5F5F5;
+    color: #333;
+    line-height: 1.5;
+}
+
+.cd-header {
+    background: #1A1A2E;
+    color: #FFFFFF;
+    padding: 16px 24px;
+    margin-bottom: 0;
+}
+
+.cd-header__title {
+    margin: 0;
+    font-size: 20px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-weight: 700;
+}
+
+.cd-header__path {
+    margin: 4px 0 0;
+    font-size: 13px;
+    opacity: 0.7;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+.cd-breadcrumb {
+    background: #EDEDF0;
+    border-bottom: 1px solid #D8D8DC;
+    padding: 8px 24px;
+    font-size: 13px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    margin-bottom: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.cd-breadcrumb__item {
+    color: #5566DD;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.cd-breadcrumb__item:hover {
+    text-decoration: underline;
+}
+
+.cd-breadcrumb__sep {
+    color: #999;
+    margin: 0 2px;
+}
+
+.cd-breadcrumb__current {
+    color: #333;
+    font-weight: 600;
+}
+
+.cd-main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px 48px;
+}
+
+.cd-node {
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    margin-bottom: 12px;
+    border-left-width: 5px;
+    border-left-style: solid;
+}
+
+.cd-node__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.cd-node__header:hover {
+    background: #FAFAFA;
+}
+
+.cd-node__toggle {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 12px;
+    color: #888;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.cd-node__icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.cd-node__name {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-weight: 700;
+    font-size: 14px;
+    color: #1A1A2E;
+}
+
+.cd-node__badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #EEEEEE;
+    color: #666666;
+}
+
+.cd-node__lines {
+    font-size: 12px;
+    color: #888888;
+}
+
+.cd-node__range {
+    font-size: 12px;
+    color: #AAAAAA;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+.cd-node__quality {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.cd-node__body {
+    padding: 0 14px 10px;
+    display: none;
+}
+
+.cd-node__body--open {
+    display: block;
+}
+
+.cd-imports {
+    background: #F9F9F9;
+    border: 1px solid #E8E8E8;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.cd-imports__label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #999999;
+    margin-bottom: 4px;
+}
+
+.cd-imports__item {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    color: #555555;
+    padding: 1px 0;
+}
+
+.cd-summary {
+    color: #555555;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.cd-analyze-link {
+    color: #5566DD;
+    cursor: pointer;
+    font-size: 13px;
+    font-style: italic;
+    margin-bottom: 8px;
+}
+
+.cd-analyze-link:hover {
+    text-decoration: underline;
+}
+
+.cd-analyzing {
+    color: #888;
+    font-size: 13px;
+    font-style: italic;
+    margin-bottom: 8px;
+    animation: cd-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes cd-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.cd-pseudocode {
+    background: #F0F4F8;
+    border: 1px solid #D0D8E0;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.cd-pseudocode__label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #999999;
+    margin-bottom: 4px;
+}
+
+.cd-pseudocode__code {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    color: #444444;
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.cd-warnings {
+    margin-bottom: 8px;
+}
+
+.cd-warnings__item {
+    font-size: 13px;
+    color: #B8860B;
+    padding: 2px 0;
+}
+
+.cd-node__children {
+    padding-left: 16px;
+}
+
+@media (max-width: 600px) {
+    .cd-header {
+        padding: 12px 12px;
+    }
+    .cd-breadcrumb {
+        padding: 8px 12px;
+    }
+    .cd-main {
+        padding: 0 8px 32px;
+    }
+    .cd-node__header {
+        padding: 8px 10px;
+    }
+    .cd-node__body {
+        padding: 0 10px 8px;
+    }
+    .cd-node__children {
+        padding-left: 8px;
+    }
+}
+</style>
+</head>
+<body>
+
+<header class="cd-header">
+    <h1 class="cd-header__title">codedocent</h1>
+    <p class="cd-header__path" id="cd-root-path"></p>
+</header>
+
+<nav class="cd-breadcrumb" id="cd-breadcrumb">
+    <span class="cd-breadcrumb__current" id="cd-bc-root"></span>
+</nav>
+
+<main class="cd-main" id="cd-main"></main>
+
+<script>
+const TREE_DATA = {{ tree_json | safe }};
+
+// Track expanded path for breadcrumbs
+let breadcrumbPath = [TREE_DATA];
+
+function escapeHtml(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function qualityEmoji(q) {
+    if (q === 'warning') return '\u{1F534}';
+    if (q === 'complex') return '\u{1F7E1}';
+    return '\u{1F7E2}';
+}
+
+function renderNode(node, depth) {
+    const el = document.createElement('div');
+    el.className = 'cd-node';
+    el.style.borderLeftColor = node.color || '#CCCCCC';
+    el.dataset.nodeId = node.node_id || '';
+
+    const isRoot = depth === 0;
+    const hasChildren = node.children && node.children.length > 0;
+    const isDir = node.node_type === 'directory';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'cd-node__header';
+
+    // Toggle indicator
+    const toggle = document.createElement('span');
+    toggle.className = 'cd-node__toggle';
+    if (hasChildren) {
+        toggle.textContent = isRoot ? 'v' : '>';
+    }
+    header.appendChild(toggle);
+
+    const icon = document.createElement('span');
+    icon.className = 'cd-node__icon';
+    icon.textContent = node.icon || '';
+    header.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'cd-node__name';
+    name.textContent = node.name;
+    header.appendChild(name);
+
+    const badge = document.createElement('span');
+    badge.className = 'cd-node__badge';
+    badge.textContent = node.node_type;
+    header.appendChild(badge);
+
+    const lines = document.createElement('span');
+    lines.className = 'cd-node__lines';
+    lines.textContent = node.line_count + ' lines';
+    header.appendChild(lines);
+
+    if ((node.node_type === 'function' || node.node_type === 'method') && node.start_line && node.end_line) {
+        const range = document.createElement('span');
+        range.className = 'cd-node__range';
+        range.textContent = 'L' + node.start_line + '\u2013' + node.end_line;
+        header.appendChild(range);
+    }
+
+    const quality = document.createElement('span');
+    quality.className = 'cd-node__quality';
+    quality.textContent = qualityEmoji(node.quality);
+    header.appendChild(quality);
+
+    el.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'cd-node__body' + (isRoot ? ' cd-node__body--open' : '');
+
+    // Imports
+    if (node.imports && node.imports.length > 0) {
+        const imp = document.createElement('div');
+        imp.className = 'cd-imports';
+        imp.innerHTML = '<div class="cd-imports__label">IMPORTS</div>' +
+            node.imports.map(i => '<div class="cd-imports__item">\u2192 ' + escapeHtml(i) + '</div>').join('');
+        body.appendChild(imp);
+    }
+
+    // Summary / analyze link
+    const summaryEl = document.createElement('div');
+    if (node.summary) {
+        summaryEl.className = 'cd-summary';
+        summaryEl.textContent = node.summary;
+        body.appendChild(summaryEl);
+    } else if (!isDir && node.node_id) {
+        summaryEl.className = 'cd-analyze-link';
+        summaryEl.textContent = 'Click to analyze with AI...';
+        summaryEl.dataset.nodeId = node.node_id;
+        summaryEl.addEventListener('click', function(e) {
+            e.stopPropagation();
+            analyzeNode(node.node_id, summaryEl, body);
+        });
+        body.appendChild(summaryEl);
+    }
+
+    // Pseudocode
+    if (node.pseudocode && (node.node_type === 'function' || node.node_type === 'method')) {
+        const pc = document.createElement('div');
+        pc.className = 'cd-pseudocode';
+        pc.innerHTML = '<div class="cd-pseudocode__label">PSEUDOCODE</div>' +
+            '<pre class="cd-pseudocode__code">' + escapeHtml(node.pseudocode) + '</pre>';
+        body.appendChild(pc);
+    }
+
+    // Warnings
+    if (node.warnings && node.warnings.length > 0 && (node.node_type === 'function' || node.node_type === 'method')) {
+        const w = document.createElement('div');
+        w.className = 'cd-warnings';
+        w.innerHTML = node.warnings.map(
+            warn => '<div class="cd-warnings__item">\u26A0\uFE0F ' + escapeHtml(warn) + '</div>'
+        ).join('');
+        body.appendChild(w);
+    }
+
+    // Children
+    if (hasChildren) {
+        const childrenEl = document.createElement('div');
+        childrenEl.className = 'cd-node__children';
+        node.children.forEach(function(child) {
+            childrenEl.appendChild(renderNode(child, depth + 1));
+        });
+        body.appendChild(childrenEl);
+    }
+
+    el.appendChild(body);
+
+    // Click handler for expand/collapse
+    header.addEventListener('click', function() {
+        const isOpen = body.classList.contains('cd-node__body--open');
+        if (isOpen) {
+            body.classList.remove('cd-node__body--open');
+            toggle.textContent = hasChildren ? '>' : '';
+        } else {
+            body.classList.add('cd-node__body--open');
+            toggle.textContent = hasChildren ? 'v' : '';
+            updateBreadcrumb(node, el);
+        }
+    });
+
+    return el;
+}
+
+function updateBreadcrumb(node, el) {
+    // Build path from root to this node by walking up DOM
+    const path = [];
+    let current = el;
+    while (current) {
+        if (current.dataset && current.dataset.nodeId) {
+            const name = current.querySelector('.cd-node__name');
+            if (name) {
+                path.unshift({name: name.textContent, el: current});
+            }
+        }
+        current = current.parentElement ? current.parentElement.closest('.cd-node') : null;
+    }
+
+    const bc = document.getElementById('cd-breadcrumb');
+    bc.innerHTML = '';
+
+    path.forEach(function(item, i) {
+        if (i > 0) {
+            const sep = document.createElement('span');
+            sep.className = 'cd-breadcrumb__sep';
+            sep.textContent = '/';
+            bc.appendChild(sep);
+        }
+        if (i < path.length - 1) {
+            const link = document.createElement('span');
+            link.className = 'cd-breadcrumb__item';
+            link.textContent = item.name;
+            link.addEventListener('click', function() {
+                item.el.scrollIntoView({behavior: 'smooth', block: 'start'});
+            });
+            bc.appendChild(link);
+        } else {
+            const cur = document.createElement('span');
+            cur.className = 'cd-breadcrumb__current';
+            cur.textContent = item.name;
+            bc.appendChild(cur);
+        }
+    });
+}
+
+function analyzeNode(nodeId, linkEl, bodyEl) {
+    // Replace link with loading indicator
+    const loading = document.createElement('div');
+    loading.className = 'cd-analyzing';
+    loading.textContent = 'Analyzing...';
+    linkEl.replaceWith(loading);
+
+    fetch('/api/analyze/' + nodeId, {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            // Replace loading with summary
+            if (data.summary) {
+                const summary = document.createElement('div');
+                summary.className = 'cd-summary';
+                summary.textContent = data.summary;
+                loading.replaceWith(summary);
+
+                // Add pseudocode if present
+                if (data.pseudocode && (data.node_type === 'function' || data.node_type === 'method')) {
+                    const pc = document.createElement('div');
+                    pc.className = 'cd-pseudocode';
+                    pc.innerHTML = '<div class="cd-pseudocode__label">PSEUDOCODE</div>' +
+                        '<pre class="cd-pseudocode__code">' + escapeHtml(data.pseudocode) + '</pre>';
+                    summary.after(pc);
+                }
+
+                // Add warnings if present
+                if (data.warnings && data.warnings.length > 0 && (data.node_type === 'function' || data.node_type === 'method')) {
+                    const w = document.createElement('div');
+                    w.className = 'cd-warnings';
+                    w.innerHTML = data.warnings.map(
+                        function(warn) { return '<div class="cd-warnings__item">\u26A0\uFE0F ' + escapeHtml(warn) + '</div>'; }
+                    ).join('');
+                    bodyEl.appendChild(w);
+                }
+
+                // Update quality indicator
+                if (data.quality) {
+                    const nodeEl = bodyEl.closest('.cd-node');
+                    const qEl = nodeEl.querySelector('.cd-node__quality');
+                    if (qEl) qEl.textContent = qualityEmoji(data.quality);
+                }
+            } else {
+                loading.textContent = 'No summary available';
+                loading.className = 'cd-summary';
+            }
+        })
+        .catch(function(err) {
+            loading.textContent = 'Analysis failed: ' + err.message;
+            loading.className = 'cd-summary';
+        });
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('cd-root-path').textContent = TREE_DATA.filepath || TREE_DATA.name;
+    document.getElementById('cd-bc-root').textContent = TREE_DATA.name;
+    document.getElementById('cd-main').appendChild(renderNode(TREE_DATA, 0));
+});
+
+// Shutdown on tab close
+window.addEventListener('beforeunload', function() {
+    navigator.sendBeacon('/shutdown');
+});
+</script>
+
+</body>
+</html>

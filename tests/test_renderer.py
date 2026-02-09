@@ -164,3 +164,22 @@ def test_render_creates_parent_directories(tmp_path):
     out = str(tmp_path / "nested" / "deep" / "output.html")
     render(root, out)
     assert os.path.isfile(out)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Interactive rendering
+# ---------------------------------------------------------------------------
+
+
+def test_render_interactive_returns_html():
+    from codedocent.analyzer import assign_node_ids
+    from codedocent.renderer import render_interactive
+
+    root = _make_tree()
+    assign_node_ids(root)
+    html = render_interactive(root)
+
+    assert "<!DOCTYPE html>" in html
+    assert "TREE_DATA" in html
+    assert "analyzeNode" in html
+    assert "</html>" in html

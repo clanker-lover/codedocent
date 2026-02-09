@@ -7,6 +7,9 @@ import json
 import os
 import re
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from codedocent.parser import CodeNode
 
@@ -17,6 +20,7 @@ except ImportError:
 
 CACHE_FILENAME = ".codedocent_cache.json"
 MAX_SOURCE_LINES = 200
+MIN_LINES_FOR_AI = 3
 
 
 def _count_nodes(node: CodeNode) -> int:
@@ -57,8 +61,15 @@ def _build_prompt(node: CodeNode, model: str = "") -> str:
 
 
 def _strip_think_tags(text: str) -> str:
-    """Remove <think>...</think> blocks from model output."""
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    """Remove <think>...</think> blocks from model output.
+
+    Handles variants: <think>, <|think|>, and unclosed tags.
+    """
+    # Remove well-formed pairs (including <|think|> variants)
+    text = re.sub(r"<\|?think\|?>.*?<\|?/think\|?>", "", text, flags=re.DOTALL)
+    # Remove unclosed tags (tag to end of string)
+    text = re.sub(r"<\|?think\|?>.*", "", text, flags=re.DOTALL)
+    return text.strip()
 
 
 def _parse_ai_response(text: str) -> tuple[str, str]:
@@ -95,7 +106,14 @@ def _summarize_with_ai(
     )
     raw = response.message.content
     raw = _strip_think_tags(raw)
-    return _parse_ai_response(raw)
+    # Garbage response fallback: empty or very short after stripping
+    if not raw or len(raw) < 10:
+        return ("Could not generate summary", "")
+    summary, pseudocode = _parse_ai_response(raw)
+    # Final guard: if summary is empty or too short, replace it
+    if not summary or len(summary) < 5:
+        summary = "Could not generate summary"
+    return summary, pseudocode
 
 
 def _count_parameters(node: CodeNode) -> int:
@@ -265,16 +283,104 @@ def _save_cache(path: str, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Node ID assignment
+# ---------------------------------------------------------------------------
+
+
+def assign_node_ids(root: CodeNode) -> dict[str, CodeNode]:
+    """Walk tree, assign a unique 12-char hex node_id to every node.
+
+    Returns a lookup dict mapping node_id -> CodeNode.
+    """
+    lookup: dict[str, CodeNode] = {}
+
+    def _walk(node: CodeNode, path_parts: list[str]) -> None:
+        key = "::".join(path_parts)
+        node_id = hashlib.md5(key.encode()).hexdigest()[:12]
+        node.node_id = node_id
+        lookup[node_id] = node
+        for child in node.children:
+            child_parts = path_parts + [child.node_type, child.name]
+            _walk(child, child_parts)
+
+    _walk(root, [root.name])
+    return lookup
+
+
+# ---------------------------------------------------------------------------
+# Single-node analysis (used by server)
+# ---------------------------------------------------------------------------
+
+
+def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
+    """Run quality scoring + AI analysis on a single node.
+
+    Reads/writes the cache. Applies min-lines guard and garbage fallback.
+    """
+    if ollama is None:
+        node.summary = "AI unavailable (ollama not installed)"
+        return
+
+    # Quality scoring
+    quality, warnings = _score_quality(node)
+    node.quality = quality
+    node.warnings = warnings
+
+    # Min-lines guard
+    if node.line_count < MIN_LINES_FOR_AI:
+        node.summary = f"Small {node.node_type} ({node.line_count} lines)"
+        return
+
+    # Directory nodes get synthesized summaries, not AI
+    if node.node_type == "directory":
+        _summarize_directory(node)
+        return
+
+    # Cache
+    cache_path = os.path.join(cache_dir, CACHE_FILENAME)
+    cache = _load_cache(cache_path)
+
+    if cache.get("model") != model:
+        cache = {"version": 1, "model": model, "entries": {}}
+
+    key = _cache_key(node)
+    if key in cache["entries"]:
+        entry = cache["entries"][key]
+        node.summary = entry.get("summary")
+        node.pseudocode = entry.get("pseudocode")
+        return
+
+    try:
+        summary, pseudocode = _summarize_with_ai(node, model)
+        node.summary = summary
+        node.pseudocode = pseudocode
+        cache["entries"][key] = {"summary": summary, "pseudocode": pseudocode}
+        _save_cache(cache_path, cache)
+    except Exception as e:
+        node.summary = f"Summary generation failed: {e}"
+
+
+# ---------------------------------------------------------------------------
 # Main entry points
 # ---------------------------------------------------------------------------
 
 
-def analyze(root: CodeNode, model: str = "qwen3:14b") -> CodeNode:
+def _collect_nodes(node: CodeNode, depth: int = 0) -> list[tuple[CodeNode, int]]:
+    """Collect all nodes with their depth for priority batching."""
+    result = [(node, depth)]
+    for child in node.children:
+        result.extend(_collect_nodes(child, depth + 1))
+    return result
+
+
+def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeNode:
     """Analyze the full tree with AI summaries and quality scoring.
 
-    Walks the tree depth-first. For each non-directory node, calls ollama
-    for summaries (with caching). For directories, synthesizes summaries
-    from children. Always runs quality scoring.
+    Uses priority batching:
+    1. Quality-score all nodes (fast pass).
+    2. AI-analyze files (shallowest first).
+    3. AI-analyze classes/functions/methods (shallowest first).
+    4. Synthesize directory summaries (deepest first / bottom-up).
     """
     if ollama is None:
         print(
@@ -294,64 +400,89 @@ def analyze(root: CodeNode, model: str = "qwen3:14b") -> CodeNode:
     if cache.get("model") != model:
         cache = {"version": 1, "model": model, "entries": {}}
 
-    total = _count_nodes(root)
+    all_nodes = _collect_nodes(root)
+    total = len(all_nodes)
     counter = [0]
+    cache_lock = threading.Lock()
+    progress_lock = threading.Lock()
+    start_time = time.monotonic()
 
-    def _walk(node: CodeNode) -> None:
-        counter[0] += 1
-        idx = counter[0]
+    def _progress(label: str) -> None:
+        with progress_lock:
+            counter[0] += 1
+            print(f"[{counter[0]}/{total}] {label}...", file=sys.stderr)
 
-        # Progress
+    def _ai_analyze(node: CodeNode) -> None:
+        """Run AI analysis on a single non-directory node."""
         label = node.name
-        if node.filepath and node.filepath != node.name:
-            parts = node.filepath.split(os.sep)
-            if len(parts) > 1:
-                label = f"{parts[-1]} \u2192 {node.name}" if node.node_type not in ("file", "directory") else node.name
+        if node.line_count < MIN_LINES_FOR_AI:
+            node.summary = f"Small {node.node_type} ({node.line_count} lines)"
+            _progress(f"Skipping small {label}")
+            return
 
-        print(f"[{idx}/{total}] Analyzing {label}...", file=sys.stderr)
-
-        # Quality scoring (always)
-        quality, warnings = _score_quality(node)
-        node.quality = quality
-        node.warnings = warnings
-
-        # AI summary (non-directory only)
-        if node.node_type != "directory":
-            key = _cache_key(node)
+        key = _cache_key(node)
+        with cache_lock:
             if key in cache["entries"]:
                 entry = cache["entries"][key]
                 node.summary = entry.get("summary")
                 node.pseudocode = entry.get("pseudocode")
-                print(
-                    f"[{idx}/{total}] cache hit: {label}",
-                    file=sys.stderr,
-                )
-            else:
-                try:
-                    summary, pseudocode = _summarize_with_ai(node, model)
-                    node.summary = summary
-                    node.pseudocode = pseudocode
-                    cache["entries"][key] = {
-                        "summary": summary,
-                        "pseudocode": pseudocode,
-                    }
-                except Exception as e:
-                    node.summary = "Summary generation failed"
-                    print(
-                        f"[{idx}/{total}] AI error for {label}: {e}",
-                        file=sys.stderr,
-                    )
+                _progress(f"Cache hit: {label}")
+                return
 
-        # Recurse into children
-        for child in node.children:
-            _walk(child)
-
-        # After children, synthesize directory summaries
-        if node.node_type == "directory":
-            _summarize_directory(node)
+        _progress(f"Analyzing {label}")
+        try:
+            summary, pseudocode = _summarize_with_ai(node, model)
+            with cache_lock:
+                node.summary = summary
+                node.pseudocode = pseudocode
+                cache["entries"][key] = {
+                    "summary": summary,
+                    "pseudocode": pseudocode,
+                }
+        except Exception as e:
+            node.summary = "Summary generation failed"
+            print(
+                f"  AI error for {label}: {e}",
+                file=sys.stderr,
+            )
 
     try:
-        _walk(root)
+        # Phase 1: Quality-score all nodes
+        for node, _depth in all_nodes:
+            quality, warnings = _score_quality(node)
+            node.quality = quality
+            node.warnings = warnings
+
+        # Phase 2: AI-analyze files (shallowest first)
+        files = [(n, d) for n, d in all_nodes if n.node_type == "file"]
+        files.sort(key=lambda x: x[1])
+
+        # Phase 3: AI-analyze classes/functions/methods (shallowest first)
+        code_nodes = [(n, d) for n, d in all_nodes
+                      if n.node_type in ("class", "function", "method")]
+        code_nodes.sort(key=lambda x: x[1])
+
+        # Combine phases 2 & 3 into a single list for submission
+        ai_nodes = [n for n, _d in files] + [n for n, _d in code_nodes]
+
+        if workers == 1:
+            for node in ai_nodes:
+                _ai_analyze(node)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(_ai_analyze, node): node
+                           for node in ai_nodes}
+                for future in as_completed(futures):
+                    exc = future.exception()
+                    if isinstance(exc, ConnectionError):
+                        raise exc
+
+        # Phase 4: Synthesize directory summaries (deepest first)
+        dirs = [(n, d) for n, d in all_nodes if n.node_type == "directory"]
+        dirs.sort(key=lambda x: x[1], reverse=True)
+        for node, _depth in dirs:
+            _summarize_directory(node)
+
     except ConnectionError as e:
         print(
             f"\nError: Could not connect to ollama: {e}\n"
@@ -361,6 +492,15 @@ def analyze(root: CodeNode, model: str = "qwen3:14b") -> CodeNode:
         sys.exit(1)
 
     _save_cache(cache_path, cache)
+
+    elapsed = time.monotonic() - start_time
+    ai_count = len(files) + len(code_nodes)
+    print(
+        f"Analysis complete: {ai_count} nodes in {elapsed:.1f}s "
+        f"({workers} workers, model: {model})",
+        file=sys.stderr,
+    )
+
     return root
 
 
