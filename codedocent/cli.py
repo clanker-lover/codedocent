@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import os
 
+from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 from codedocent.parser import CodeNode, parse_directory
 from codedocent.scanner import scan_directory
+
+
+# Re-export for backwards compatibility and testability
+_check_ollama = check_ollama
+_fetch_ollama_models = fetch_ollama_models
 
 
 def print_tree(node: CodeNode, indent: int = 0) -> None:
@@ -34,13 +41,103 @@ def print_tree(node: CodeNode, indent: int = 0) -> None:
         print_tree(child, indent + 1)
 
 
+def _ask_folder() -> str:
+    """Prompt for a valid folder path, re-asking on invalid input."""
+    while True:
+        path = input("What folder do you want to analyze? ").strip()
+        path = os.path.expanduser(path)
+        if os.path.isdir(path):
+            file_count = len(list(scan_directory(path)))
+            print(f"\u2713 Found {file_count} files\n")
+            return path
+        print(f"  '{path}' is not a valid directory. Try again.\n")
+
+
+def _ask_no_ai_fallback() -> bool:
+    """Ask user whether to continue without AI. Returns True for no-ai."""
+    fallback = input("Continue without AI? [Y/n]: ").strip().lower()
+    if fallback in ("", "y", "yes"):
+        return True
+    raise SystemExit(0)
+
+
+def _pick_model(models: list[str]) -> str:
+    """Let the user pick from a numbered list of models."""
+    print("Available models:")
+    for i, m in enumerate(models, 1):
+        print(f"  {i}. {m}")
+    choice = input("Which model? [1]: ").strip()
+    if choice == "":
+        return models[0]
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(models):
+            return models[idx]
+    except ValueError:
+        pass
+    return models[0]
+
+
+def _run_wizard() -> argparse.Namespace:  # pylint: disable=too-many-branches
+    """Interactive setup wizard for codedocent."""
+    print("\ncodedocent \u2014 code visualization for humans\n")
+
+    path = _ask_folder()
+
+    # --- Ollama check ---
+    model = "qwen3:14b"
+    no_ai = False
+
+    print("Checking for Ollama...", end=" ", flush=True)
+    if _check_ollama():
+        print("found!")
+        models = _fetch_ollama_models()
+        if models:
+            model = _pick_model(models)
+        else:
+            print("No models found.")
+            no_ai = _ask_no_ai_fallback()
+    else:
+        print("not found.")
+        no_ai = _ask_no_ai_fallback()
+
+    # --- Mode ---
+    print("\nHow do you want to view it?")
+    print("  1. Interactive \u2014 browse in browser [default]")
+    print("  2. Full export \u2014 analyze everything, save HTML")
+    print("  3. Text tree \u2014 plain text in terminal")
+    mode_choice = input("Choice [1]: ").strip()
+
+    text = mode_choice == "3"
+    full = mode_choice == "2"
+
+    print()
+
+    return argparse.Namespace(
+        path=path,
+        text=text,
+        output="codedocent_output.html",
+        model=model,
+        no_ai=no_ai,
+        full=full,
+        port=None,
+        workers=1,
+        gui=False,
+    )
+
+
 def main() -> None:
     """Entry point for the codedocent CLI."""
     parser = argparse.ArgumentParser(
         prog="codedocent",
         description="Code visualization for non-programmers",
     )
-    parser.add_argument("path", help="Path to the directory to scan")
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="Path to the directory to scan",
+    )
     parser.add_argument(
         "--text",
         action="store_true",
@@ -85,8 +182,22 @@ def main() -> None:
         default=1,
         help="Number of parallel AI workers for --full mode (default: 1)",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Open GUI launcher",
+    )
 
     args = parser.parse_args()
+
+    if args.gui:
+        from codedocent.gui import main as gui_main  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+        gui_main()
+        return
+
+    if args.path is None:
+        args = _run_wizard()
 
     scanned = scan_directory(args.path)
     tree = parse_directory(scanned, root=args.path)

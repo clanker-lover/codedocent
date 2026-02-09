@@ -108,6 +108,9 @@ def start_server(  # pylint: disable=too-many-locals,too-many-statements
                 self._serve_html()
             elif self.path == "/api/tree":
                 self._serve_tree()
+            elif self.path.startswith("/api/source/"):
+                node_id = self.path[len("/api/source/"):]
+                self._handle_source(node_id)
             else:
                 self.send_error(404)
 
@@ -136,6 +139,19 @@ def start_server(  # pylint: disable=too-many-locals,too-many-statements
         def _serve_tree(self):
             tree_dict = _node_to_dict(root)
             data = json.dumps(tree_dict).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _handle_source(self, node_id: str):
+            if node_id not in node_lookup:
+                self.send_error(404, "Unknown node ID")
+                return
+            node = node_lookup[node_id]
+            result = {"source": node.source or ""}
+            data = json.dumps(result).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))

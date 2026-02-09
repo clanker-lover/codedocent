@@ -25,3 +25,4 @@ codedocent = ["templates/*.html"]
 
 [project.scripts]
 codedocent = "codedocent.cli:main"
+codedocent-gui = "codedocent.gui:main"

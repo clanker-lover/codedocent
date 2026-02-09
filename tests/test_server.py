@@ -338,3 +338,38 @@ def test_replace_clears_summary(server_fixture, tmp_path):
 
     assert func_node.summary is None
     assert func_node.pseudocode is None
+
+
+# ---------------------------------------------------------------------------
+# Source endpoint integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_source_returns_source(server_fixture):
+    """GET /api/source/{node_id} returns source without triggering analysis."""
+    port, _, lookup = server_fixture
+
+    # Ensure summary is None — source endpoint should NOT trigger AI
+    func_node = lookup["abc123def456"]
+    func_node.summary = None
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/api/source/abc123def456")
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read())
+    assert "source" in data
+    assert "def add" in data["source"]
+    conn.close()
+
+    # Summary should still be None — no AI was triggered
+    assert func_node.summary is None
+
+
+def test_get_source_unknown_node_returns_404(server_fixture):
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/api/source/nonexistent999")
+    resp = conn.getresponse()
+    assert resp.status == 404
+    conn.close()

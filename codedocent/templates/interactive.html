@@ -539,7 +539,7 @@ function cdFetchSource(nodeId, callback) {
         callback(sourceCache[nodeId]);
         return;
     }
-    fetch('/api/analyze/' + nodeId, {method: 'POST'})
+    fetch('/api/source/' + nodeId)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.source) {
@@ -871,7 +871,7 @@ function renderNode(node, depth) {
     }
 
     // Code export buttons (for pre-analyzed nodes with summaries at load time)
-    if (!isDir && node.node_id && node.summary) {
+    if (!isDir && node.node_id) {
         cdCreateCodeActions(body, node.node_id, node.node_type, node.name, node.filepath, node.language);
     }
 
