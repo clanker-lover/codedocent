@@ -1,0 +1,166 @@
+"""Tests for codedocent.renderer."""
+
+import os
+
+import pytest
+
+from codedocent.parser import CodeNode
+from codedocent.renderer import DEFAULT_COLOR, LANGUAGE_COLORS, _get_color, render
+
+
+def _make_tree() -> CodeNode:
+    """Build a small tree: directory → file (python, with imports) → class → method."""
+    method = CodeNode(
+        name="greet",
+        node_type="method",
+        language="python",
+        filepath="src/app.py",
+        start_line=5,
+        end_line=6,
+        source="def greet(self):\n    return 'hi'",
+        line_count=2,
+    )
+    cls = CodeNode(
+        name="Greeter",
+        node_type="class",
+        language="python",
+        filepath="src/app.py",
+        start_line=3,
+        end_line=6,
+        source="class Greeter:\n    ...",
+        line_count=4,
+        children=[method],
+    )
+    file_node = CodeNode(
+        name="app.py",
+        node_type="file",
+        language="python",
+        filepath="src/app.py",
+        start_line=1,
+        end_line=10,
+        source="",
+        line_count=10,
+        children=[cls],
+        imports=["os", "sys"],
+    )
+    root = CodeNode(
+        name="src",
+        node_type="directory",
+        language=None,
+        filepath="/tmp/src",
+        start_line=0,
+        end_line=0,
+        source="",
+        line_count=10,
+        children=[file_node],
+    )
+    return root
+
+
+def test_render_creates_file(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    assert os.path.isfile(out)
+
+
+def test_render_contains_node_names(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    for name in ("src", "app.py", "Greeter", "greet"):
+        assert name in html
+
+
+def test_render_contains_imports(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "IMPORTS" in html
+    assert "os" in html
+    assert "sys" in html
+
+
+def test_render_contains_summary_placeholder(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "AI summary pending..." in html
+
+
+def test_render_contains_quality_indicator(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "\U0001f7e2" in html
+
+
+def test_render_contains_line_counts(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "10 lines" in html
+
+
+def test_render_valid_html(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert html.startswith("<!DOCTYPE html>")
+    assert "<html" in html
+    assert "</html>" in html
+
+
+def test_get_color_known_language():
+    node = CodeNode(
+        name="x.py",
+        node_type="file",
+        language="python",
+        filepath="x.py",
+        start_line=1,
+        end_line=1,
+        source="",
+        line_count=1,
+    )
+    assert _get_color(node) == "#3572A5"
+
+
+def test_get_color_unknown_language():
+    node = CodeNode(
+        name="x.foo",
+        node_type="file",
+        language="brainfuck",
+        filepath="x.foo",
+        start_line=1,
+        end_line=1,
+        source="",
+        line_count=1,
+    )
+    assert _get_color(node) == DEFAULT_COLOR
+
+
+def test_get_color_none_language():
+    node = CodeNode(
+        name="src",
+        node_type="directory",
+        language=None,
+        filepath="/tmp/src",
+        start_line=0,
+        end_line=0,
+        source="",
+        line_count=0,
+    )
+    assert _get_color(node) == DEFAULT_COLOR
+
+
+def test_render_creates_parent_directories(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "nested" / "deep" / "output.html")
+    render(root, out)
+    assert os.path.isfile(out)
