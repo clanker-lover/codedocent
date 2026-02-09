@@ -205,24 +205,36 @@ def _extract_methods(class_node, language: str) -> list[CodeNode]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse_file(  # pylint: disable=too-many-locals
-    filepath: str, language: str, source: str | None = None,
-) -> CodeNode:
-    """Parse a single source file and return a file-level CodeNode.
+def _extract_top_level_nodes(
+    root_node, rules: dict, language: str, filepath: str,
+) -> list[CodeNode]:
+    """Walk AST top-level children, create CodeNodes, attach methods."""
+    children: list[CodeNode] = []
+    for child in root_node.children:
+        if child.type in rules:
+            our_type, name_child = rules[child.type]
+            node = CodeNode(
+                name=_find_child_text(child, name_child),
+                node_type=our_type,
+                language=language,
+                filepath=filepath,
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                source=child.text.decode() if child.text else "",
+                line_count=child.end_point[0] - child.start_point[0] + 1,
+            )
+            if our_type == "class":
+                node.children = _extract_methods(child, language)
+                for m in node.children:
+                    m.filepath = filepath
+            children.append(node)
+    return children
 
-    If *source* is provided it is used directly; otherwise the file is read
-    from disk.
-    """
-    if source is None:
-        with open(filepath, encoding="utf-8") as f:
-            source = f.read()
 
-    source_bytes = source.encode()
-    lines = source.splitlines()
-    line_count = len(lines)
-
-    # Build the file-level node
-    file_node = CodeNode(
+def _make_file_node(filepath: str, language: str, source: str) -> CodeNode:
+    """Create a file-level CodeNode from source text."""
+    line_count = len(source.splitlines())
+    return CodeNode(
         name=os.path.basename(filepath),
         node_type="file",
         language=language,
@@ -233,9 +245,23 @@ def parse_file(  # pylint: disable=too-many-locals
         line_count=line_count,
     )
 
-    # Languages we can parse with tree-sitter
-    parseable = _rules_for(language)
-    if not parseable:
+
+def parse_file(
+    filepath: str, language: str, source: str | None = None,
+) -> CodeNode:
+    """Parse a single source file and return a file-level CodeNode.
+
+    If *source* is provided it is used directly; otherwise the file
+    is read from disk.
+    """
+    if source is None:
+        with open(filepath, encoding="utf-8") as f:
+            source = f.read()
+
+    file_node = _make_file_node(filepath, language, source)
+
+    rules = _rules_for(language)
+    if not rules:
         return file_node
 
     try:
@@ -243,48 +269,77 @@ def parse_file(  # pylint: disable=too-many-locals
     except (KeyError, ValueError):
         return file_node
 
-    tree = parser.parse(source_bytes)
-    root = tree.root_node
-
-    # Extract imports
+    root = parser.parse(source.encode()).root_node
     file_node.imports = _extract_imports(root, language)
+    file_node.children = _extract_top_level_nodes(
+        root, rules, language, filepath,
+    )
 
-    # Walk top-level children for classes/functions
-    for child in root.children:
-        if child.type in parseable:
-            our_type, name_child = parseable[child.type]
-            node = CodeNode(
-                name=_find_child_text(child, name_child),
-                node_type=our_type,
-                language=language,
-                filepath=filepath,
-                start_line=child.start_point[0] + 1,
-                end_line=child.end_point[0] + 1,
-                source=(
-                    child.text.decode() if child.text else ""
-                ),
-                line_count=child.end_point[0] - child.start_point[0] + 1,
-            )
-            # If it's a class, extract methods as children
-            if our_type == "class":
-                node.children = _extract_methods(child, language)
-                for m in node.children:
-                    m.filepath = filepath
-            file_node.children.append(node)
-
-    # Arrow functions (JS/TS)
     arrows = _extract_arrow_functions(root, language)
     for a in arrows:
         a.filepath = filepath
     file_node.children.extend(arrows)
-
-    # Sort children by start_line
     file_node.children.sort(key=lambda n: n.start_line)
 
     return file_node
 
 
-def parse_directory(  # pylint: disable=too-many-locals
+def _sort_tree_children(node: CodeNode) -> None:
+    """Sort directory children: dirs first, then files, alphabetically."""
+    node.children.sort(
+        key=lambda n: (
+            0 if n.node_type == "directory" else 1,
+            n.name,
+        )
+    )
+    for child in node.children:
+        if child.node_type == "directory":
+            _sort_tree_children(child)
+
+
+def _accumulate_line_counts(node: CodeNode) -> int:
+    """Accumulate line counts up the tree for directory nodes."""
+    if node.node_type in ("directory",):
+        total = sum(_accumulate_line_counts(c) for c in node.children)
+        node.line_count = total
+        return total
+    return node.line_count
+
+
+def _attach_files_to_tree(
+    scanned_files: list[ScannedFile], root_path: str, dir_node: CodeNode,
+) -> None:
+    """Parse each scanned file and attach to the directory tree."""
+    dir_nodes: dict[str, CodeNode] = {"": dir_node}
+
+    for sf in scanned_files:
+        parts = Path(sf.filepath).parts
+        for i in range(len(parts) - 1):
+            dir_key = os.path.join(*parts[: i + 1])
+            if dir_key not in dir_nodes:
+                parent_key = os.path.join(*parts[:i]) if i > 0 else ""
+                d = CodeNode(
+                    name=parts[i],
+                    node_type="directory",
+                    language=None,
+                    filepath=os.path.join(root_path, dir_key),
+                    start_line=0,
+                    end_line=0,
+                    source="",
+                    line_count=0,
+                )
+                dir_nodes[parent_key].children.append(d)
+                dir_nodes[dir_key] = d
+
+        abs_path = os.path.join(root_path, sf.filepath)
+        file_node = parse_file(abs_path, sf.language)
+        file_node.filepath = sf.filepath
+
+        parent_key = os.path.join(*parts[:-1]) if len(parts) > 1 else ""
+        dir_nodes[parent_key].children.append(file_node)
+
+
+def parse_directory(
     scanned_files: list[ScannedFile],
     root: str | None = None,
 ) -> CodeNode:
@@ -310,60 +365,8 @@ def parse_directory(  # pylint: disable=too-many-locals
         line_count=0,
     )
 
-    # Build a tree of directories, then attach file parse results
-    dir_nodes: dict[str, CodeNode] = {"": dir_node}
-
-    for sf in scanned_files:
-        # Ensure parent directory nodes exist
-        parts = Path(sf.filepath).parts
-        for i in range(len(parts) - 1):
-            dir_key = os.path.join(*parts[: i + 1])
-            if dir_key not in dir_nodes:
-                parent_key = os.path.join(*parts[:i]) if i > 0 else ""
-                d = CodeNode(
-                    name=parts[i],
-                    node_type="directory",
-                    language=None,
-                    filepath=os.path.join(root_path, dir_key),
-                    start_line=0,
-                    end_line=0,
-                    source="",
-                    line_count=0,
-                )
-                dir_nodes[parent_key].children.append(d)
-                dir_nodes[dir_key] = d
-
-        # Parse the file
-        abs_path = os.path.join(root_path, sf.filepath)
-        file_node = parse_file(abs_path, sf.language)
-        file_node.filepath = sf.filepath  # store relative path
-
-        # Attach to parent directory
-        parent_key = os.path.join(*parts[:-1]) if len(parts) > 1 else ""
-        dir_nodes[parent_key].children.append(file_node)
-
-    # Sort all directory children: dirs first, then files, alphabetically
-    def _sort_children(node: CodeNode) -> None:
-        node.children.sort(
-            key=lambda n: (
-                0 if n.node_type == "directory" else 1,
-                n.name,
-            )
-        )
-        for child in node.children:
-            if child.node_type == "directory":
-                _sort_children(child)
-
-    _sort_children(dir_node)
-
-    # Accumulate line counts up the tree
-    def _accumulate(node: CodeNode) -> int:
-        if node.node_type in ("directory",):
-            total = sum(_accumulate(c) for c in node.children)
-            node.line_count = total
-            return total
-        return node.line_count
-
-    _accumulate(dir_node)
+    _attach_files_to_tree(scanned_files, root_path, dir_node)
+    _sort_tree_children(dir_node)
+    _accumulate_line_counts(dir_node)
 
     return dir_node

@@ -12,6 +12,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from codedocent.parser import CodeNode
+from codedocent.quality import (
+    _score_quality,
+    _rollup_quality,
+    _summarize_directory,
+)
 
 try:
     import ollama
@@ -21,16 +26,6 @@ except ImportError:
 CACHE_FILENAME = ".codedocent_cache.json"
 MAX_SOURCE_LINES = 200
 MIN_LINES_FOR_AI = 3
-
-# Quality scoring thresholds: (yellow_threshold, red_threshold)
-# yellow = "complex", red = "warning"
-LINE_THRESHOLDS: dict[str, tuple[int, int]] = {
-    "function": (50, 100),
-    "method": (50, 100),
-    "file": (500, 1000),
-    "class": (300, 600),
-}
-PARAM_THRESHOLD = 5
 
 
 def _count_nodes(node: CodeNode) -> int:
@@ -126,197 +121,6 @@ def _summarize_with_ai(
     if not summary or len(summary) < 5:
         summary = "Could not generate summary"
     return summary, pseudocode
-
-
-def _count_parameters(node: CodeNode) -> int:
-    """Count parameters of a function/method using tree-sitter."""
-    if not node.source or not node.language:
-        return 0
-
-    import tree_sitter_language_pack as tslp  # pylint: disable=import-outside-toplevel  # noqa: E501
-
-    try:
-        parser = tslp.get_parser(node.language)  # type: ignore[arg-type]
-    except (KeyError, ValueError):
-        return 0
-
-    tree = parser.parse(node.source.encode())
-    root = tree.root_node
-
-    # Find the parameters / formal_parameters node
-    param_node = None
-
-    def _find_params(n):
-        nonlocal param_node
-        if param_node is not None:
-            return
-        if n.type in ("parameters", "formal_parameters"):
-            param_node = n
-            return
-        for child in n.children:
-            _find_params(child)
-
-    _find_params(root)
-    if param_node is None:
-        return 0
-
-    count = 0
-    for child in param_node.children:
-        # Skip punctuation like ( ) ,
-        if child.type in ("(", ")", ","):
-            continue
-        # For Python, skip self/cls
-        if node.language == "python":
-            text = child.text.decode() if child.text else ""
-            if text in ("self", "cls"):
-                continue
-        count += 1
-
-    return count
-
-
-def _worst_quality(a: str, b: str) -> str:
-    """Return the worse of two quality labels."""
-    order = {"clean": 0, "complex": 1, "warning": 2}
-    return a if order.get(a, 0) >= order.get(b, 0) else b
-
-
-def _score_quality(
-    node: CodeNode,
-) -> tuple[str | None, list[str] | None]:
-    """Score code quality using radon and heuristics.
-
-    Returns (quality, warnings) where quality is 'clean', 'complex',
-    or 'warning', and warnings is a list of warning strings.
-    For directories, returns (None, None).
-    """
-    if node.node_type == "directory":
-        return None, None
-
-    warnings: list[str] = []
-    quality = "clean"
-
-    # Radon complexity for Python
-    if node.language == "python" and node.source:
-        try:
-            from radon.complexity import cc_visit, cc_rank  # type: ignore[import-untyped]  # pylint: disable=import-outside-toplevel  # noqa: E501
-
-            blocks = cc_visit(node.source)
-            if blocks:
-                worst = max(b.complexity for b in blocks)
-                rank = cc_rank(worst)
-                if rank in ("A", "B"):
-                    pass  # clean
-                elif rank == "C":
-                    quality = _worst_quality(quality, "complex")
-                    warnings.append(
-                        f"Moderate complexity (grade {rank},"
-                        f" score {worst})"
-                    )
-                else:
-                    quality = _worst_quality(quality, "warning")
-                    warnings.append(
-                        f"High complexity (grade {rank},"
-                        f" score {worst})"
-                    )
-        except (ImportError, AttributeError):  # nosec B110
-            pass
-
-    # Line-count check (two-tier: yellow/red)
-    thresholds = LINE_THRESHOLDS.get(node.node_type)
-    if thresholds and node.line_count:
-        yellow, red = thresholds
-        if node.line_count > red:
-            quality = _worst_quality(quality, "warning")
-            warnings.append(
-                f"This {node.node_type} is"
-                f" {node.line_count} lines long"
-            )
-        elif node.line_count > yellow:
-            quality = _worst_quality(quality, "complex")
-            warnings.append(f"Long {node.node_type}: {node.line_count} lines")
-
-    # Heuristic: many parameters
-    if node.node_type in ("function", "method"):
-        param_count = _count_parameters(node)
-        if param_count > PARAM_THRESHOLD:
-            quality = _worst_quality(quality, "complex")
-            warnings.append("Many parameters: consider grouping")
-
-    return quality, warnings if warnings else None
-
-
-def _summarize_directory(node: CodeNode) -> None:
-    """Synthesize a directory summary from children. No AI needed."""
-    if node.node_type != "directory":
-        return
-
-    file_children = [c for c in node.children if c.node_type == "file"]
-    dir_children = [c for c in node.children if c.node_type == "directory"]
-
-    parts: list[str] = []
-    if file_children:
-        names = ", ".join(c.name for c in file_children)
-        parts.append(f"{len(file_children)} files: {names}")
-    if dir_children:
-        names = ", ".join(c.name for c in dir_children)
-        parts.append(f"{len(dir_children)} directories: {names}")
-
-    node.summary = (
-        f"Contains {'; '.join(parts)}" if parts else "Empty directory"
-    )
-
-    # Quality = worst child quality with descriptive rollup
-    quality_order = {"warning": 2, "complex": 1, "clean": 0}
-    worst = "clean"
-    rollup_warnings: list[str] = []
-    complex_count = 0
-    warning_count = 0
-    for child in node.children:
-        child_rank = quality_order.get(
-            child.quality or "clean", 0
-        )
-        worst_rank = quality_order.get(worst, 0)
-        if child.quality and child_rank > worst_rank:
-            worst = child.quality
-        if child.quality == "complex":
-            complex_count += 1
-        if child.quality == "warning":
-            warning_count += 1
-
-    if warning_count:
-        label = "child" if warning_count == 1 else "children"
-        rollup_warnings.append(f"Contains {warning_count} high-risk {label}")
-    if complex_count:
-        label = "child" if complex_count == 1 else "children"
-        rollup_warnings.append(f"{complex_count} complex {label} inside")
-
-    node.quality = worst
-    node.warnings = rollup_warnings if rollup_warnings else None
-
-
-def _rollup_quality(node: CodeNode) -> None:
-    """Roll up child quality into a file or class node."""
-    if not node.children:
-        return
-    quality_order = {"warning": 2, "complex": 1, "clean": 0}
-    own_quality = node.quality or "clean"
-    own_warnings = list(node.warnings) if node.warnings else []
-    complex_count = sum(1 for c in node.children if c.quality == "complex")
-    warning_count = sum(1 for c in node.children if c.quality == "warning")
-    worst_child = (
-        "warning" if warning_count
-        else ("complex" if complex_count else "clean")
-    )
-    if quality_order[worst_child] > quality_order.get(own_quality, 0):
-        node.quality = worst_child
-    if warning_count:
-        label = "function" if warning_count == 1 else "functions"
-        own_warnings.append(f"Contains {warning_count} high-risk {label}")
-    if complex_count:
-        label = "function" if complex_count == 1 else "functions"
-        own_warnings.append(f"{complex_count} complex {label} inside")
-    node.warnings = own_warnings if own_warnings else None
 
 
 # ---------------------------------------------------------------------------
@@ -448,67 +252,84 @@ def _collect_nodes(
     return result
 
 
-def analyze(  # pylint: disable=too-many-locals,too-many-statements
-    root: CodeNode,
-    model: str = "qwen3:14b",
-    workers: int = 1,
-) -> CodeNode:
-    """Analyze the full tree with AI summaries and quality scoring.
+def _score_all_nodes(all_nodes: list[tuple[CodeNode, int]]) -> None:
+    """Phase 1: Quality-score all nodes."""
+    for node, _depth in all_nodes:
+        quality, warnings = _score_quality(node)
+        node.quality = quality
+        node.warnings = warnings
 
-    Uses priority batching:
-    1. Quality-score all nodes (fast pass).
-    2. AI-analyze files (shallowest first).
-    3. AI-analyze classes/functions/methods (shallowest first).
-    4. Synthesize directory summaries (deepest first / bottom-up).
-    """
-    if ollama is None:
-        print(
-            "Error: ollama package not installed. "
-            "Install with: pip install ollama\n"
-            "Or use --no-ai to skip AI analysis.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
-    # Determine cache path
-    cache_dir = root.filepath or "."
-    cache_path = os.path.join(cache_dir, CACHE_FILENAME)
-    cache = _load_cache(cache_path)
+def _rollup_file_quality(all_nodes: list[tuple[CodeNode, int]]) -> None:
+    """Phase 1b: Rollup quality to files and classes (deepest first)."""
+    rollup_nodes = [
+        (n, d) for n, d in all_nodes
+        if n.node_type in ("file", "class")
+    ]
+    rollup_nodes.sort(key=lambda x: x[1], reverse=True)
+    for node, _depth in rollup_nodes:
+        _rollup_quality(node)
 
-    # Invalidate cache if model changed
-    if cache.get("model") != model:
-        cache = {"version": 1, "model": model, "entries": {}}
 
-    all_nodes = _collect_nodes(root)
-    total = len(all_nodes)
-    counter = [0]
-    cache_lock = threading.Lock()
-    progress_lock = threading.Lock()
-    start_time = time.monotonic()
+def _select_ai_nodes(
+    all_nodes: list[tuple[CodeNode, int]],
+) -> list[CodeNode]:
+    """Select and sort nodes for AI analysis (files then code)."""
+    files = sorted(
+        ((n, d) for n, d in all_nodes if n.node_type == "file"),
+        key=lambda x: x[1],
+    )
+    code = sorted(
+        ((n, d) for n, d in all_nodes
+         if n.node_type in ("class", "function", "method")),
+        key=lambda x: x[1],
+    )
+    return [n for n, _ in files] + [n for n, _ in code]
+
+
+def _dispatch_work(func, nodes: list[CodeNode], workers: int) -> None:
+    """Run *func* on each node, serially or in parallel."""
+    if workers == 1:
+        for node in nodes:
+            func(node)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(func, n): n for n in nodes}
+            for future in as_completed(futs):
+                exc = future.exception()
+                if isinstance(exc, ConnectionError):
+                    raise exc
+
+
+def _run_ai_batch(
+    all_nodes: list[tuple[CodeNode, int]],
+    model: str,
+    cache: dict,
+    workers: int,
+) -> int:
+    """Phases 2 & 3: AI-analyze files then code nodes."""
+    total, counter = len(all_nodes), [0]
+    cache_lock, progress_lock = threading.Lock(), threading.Lock()
 
     def _progress(label: str) -> None:
         with progress_lock:
             counter[0] += 1
             print(f"[{counter[0]}/{total}] {label}...", file=sys.stderr)
 
-    def _ai_analyze(node: CodeNode) -> None:
-        """Run AI analysis on a single non-directory node."""
-        label = node.name
+    def _do_one(node: CodeNode) -> None:
         if node.line_count < MIN_LINES_FOR_AI:
             node.summary = f"Small {node.node_type} ({node.line_count} lines)"
-            _progress(f"Skipping small {label}")
+            _progress(f"Skipping small {node.name}")
             return
-
         key = _cache_key(node)
         with cache_lock:
             if key in cache["entries"]:
                 entry = cache["entries"][key]
                 node.summary = entry.get("summary")
                 node.pseudocode = entry.get("pseudocode")
-                _progress(f"Cache hit: {label}")
+                _progress(f"Cache hit: {node.name}")
                 return
-
-        _progress(f"Analyzing {label}")
+        _progress(f"Analyzing {node.name}")
         try:
             summary, pseudocode = _summarize_with_ai(node, model)
             with cache_lock:
@@ -520,57 +341,60 @@ def analyze(  # pylint: disable=too-many-locals,too-many-statements
                 }
         except Exception as e:  # pylint: disable=broad-exception-caught
             node.summary = "Summary generation failed"
-            print(
-                f"  AI error for {label}: {e}",
-                file=sys.stderr,
-            )
+            print(f"  AI error for {node.name}: {e}", file=sys.stderr)
+
+    ai_nodes = _select_ai_nodes(all_nodes)
+    _dispatch_work(_do_one, ai_nodes, workers)
+    return len(ai_nodes)
+
+
+def _summarize_directories(all_nodes: list[tuple[CodeNode, int]]) -> None:
+    """Phase 4: Synthesize directory summaries (deepest first)."""
+    dirs = [(n, d) for n, d in all_nodes if n.node_type == "directory"]
+    dirs.sort(key=lambda x: x[1], reverse=True)
+    for node, _depth in dirs:
+        _summarize_directory(node)
+
+
+def _require_ollama() -> None:
+    """Exit with error if ollama is not installed."""
+    if ollama is None:
+        print(
+            "Error: ollama package not installed. "
+            "Install with: pip install ollama\n"
+            "Or use --no-ai to skip AI analysis.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _init_cache(root: CodeNode, model: str) -> tuple[str, dict]:
+    """Load (or reset) the analysis cache for *model*."""
+    cache_dir = root.filepath or "."
+    cache_path = os.path.join(cache_dir, CACHE_FILENAME)
+    cache = _load_cache(cache_path)
+    if cache.get("model") != model:
+        cache = {"version": 1, "model": model, "entries": {}}
+    return cache_path, cache
+
+
+def analyze(
+    root: CodeNode,
+    model: str = "qwen3:14b",
+    workers: int = 1,
+) -> CodeNode:
+    """Analyze the full tree with AI summaries and quality scoring."""
+    _require_ollama()
+
+    cache_path, cache = _init_cache(root, model)
+    all_nodes = _collect_nodes(root)
+    start_time = time.monotonic()
+
+    _score_all_nodes(all_nodes)
+    _rollup_file_quality(all_nodes)
 
     try:
-        # Phase 1: Quality-score all nodes
-        for node, _depth in all_nodes:
-            quality, warnings = _score_quality(node)
-            node.quality = quality
-            node.warnings = warnings
-
-        # Phase 1b: Rollup quality to files and classes (deepest first)
-        rollup_nodes = [
-            (n, d) for n, d in all_nodes
-            if n.node_type in ("file", "class")
-        ]
-        rollup_nodes.sort(key=lambda x: x[1], reverse=True)
-        for node, _depth in rollup_nodes:
-            _rollup_quality(node)
-
-        # Phase 2: AI-analyze files (shallowest first)
-        files = [(n, d) for n, d in all_nodes if n.node_type == "file"]
-        files.sort(key=lambda x: x[1])
-
-        # Phase 3: AI-analyze classes/functions/methods (shallowest first)
-        code_nodes = [(n, d) for n, d in all_nodes
-                      if n.node_type in ("class", "function", "method")]
-        code_nodes.sort(key=lambda x: x[1])
-
-        # Combine phases 2 & 3 into a single list for submission
-        ai_nodes = [n for n, _d in files] + [n for n, _d in code_nodes]
-
-        if workers == 1:
-            for node in ai_nodes:
-                _ai_analyze(node)
-        else:
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {executor.submit(_ai_analyze, node): node
-                           for node in ai_nodes}
-                for future in as_completed(futures):
-                    exc = future.exception()
-                    if isinstance(exc, ConnectionError):
-                        raise exc
-
-        # Phase 4: Synthesize directory summaries (deepest first)
-        dirs = [(n, d) for n, d in all_nodes if n.node_type == "directory"]
-        dirs.sort(key=lambda x: x[1], reverse=True)
-        for node, _depth in dirs:
-            _summarize_directory(node)
-
+        ai_count = _run_ai_batch(all_nodes, model, cache, workers)
     except ConnectionError as e:
         print(
             f"\nError: Could not connect to ollama: {e}\n"
@@ -580,10 +404,10 @@ def analyze(  # pylint: disable=too-many-locals,too-many-statements
         )
         sys.exit(1)
 
+    _summarize_directories(all_nodes)
     _save_cache(cache_path, cache)
 
     elapsed = time.monotonic() - start_time
-    ai_count = len(files) + len(code_nodes)
     print(
         f"Analysis complete: {ai_count} nodes in {elapsed:.1f}s "
         f"({workers} workers, model: {model})",

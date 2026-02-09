@@ -138,7 +138,7 @@ def test_parse_garbage_response():
 
 
 def test_quality_simple_clean():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     node = _make_func_node(source="def add(a, b):\n    return a + b\n")
     quality, warnings = _score_quality(node)
@@ -146,7 +146,7 @@ def test_quality_simple_clean():
 
 
 def test_quality_complex_branchy():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     source = "def decide(x):\n"
     for i in range(12):
@@ -161,7 +161,7 @@ def test_quality_complex_branchy():
 
 
 def test_directory_summary_no_ai():
-    from codedocent.analyzer import _summarize_directory
+    from codedocent.quality import _summarize_directory
 
     children = [
         _make_file_node(name="a.py", source="x=1\n"),
@@ -243,7 +243,7 @@ def test_strip_think_tags():
 
 
 def test_long_function_warning():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 56-line function
     lines = ["def long_func():"]
@@ -259,7 +259,7 @@ def test_long_function_warning():
 
 
 def test_many_params_warning():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     source = "def many(a, b, c, d, e, f):\n    pass\n"
     node = _make_func_node(name="many", source=source)
@@ -410,7 +410,7 @@ def test_garbage_response_fallback(mock_ollama, tmp_path):
 
 
 def test_quality_function_yellow_tier():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 60-line function (above 50 yellow, below 100 red)
     lines = ["def long_func():"]
@@ -427,7 +427,7 @@ def test_quality_function_yellow_tier():
 
 
 def test_quality_function_red_tier():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 110-line function (above 100 red)
     lines = ["def very_long_func():"]
@@ -444,7 +444,7 @@ def test_quality_function_red_tier():
 
 
 def test_quality_file_yellow_tier():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 550-line file (above 500 yellow, below 1000 red)
     lines = [f"x_{i} = {i}" for i in range(550)]
@@ -459,7 +459,7 @@ def test_quality_file_yellow_tier():
 
 
 def test_quality_file_red_tier():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 1100-line file (above 1000 red)
     lines = [f"x_{i} = {i}" for i in range(1100)]
@@ -474,7 +474,7 @@ def test_quality_file_red_tier():
 
 
 def test_quality_class_yellow_tier():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     # 311-line class (above 300 yellow, below 600 red)
     lines = ["class BigClass:"]
@@ -497,7 +497,7 @@ def test_quality_class_yellow_tier():
 
 
 def test_quality_rollup_to_file():
-    from codedocent.analyzer import _rollup_quality
+    from codedocent.quality import _rollup_quality
 
     child = _make_func_node(name="bad_func")
     child.quality = "warning"
@@ -514,7 +514,7 @@ def test_quality_rollup_to_file():
 
 
 def test_quality_rollup_complex_count():
-    from codedocent.analyzer import _rollup_quality
+    from codedocent.quality import _rollup_quality
 
     child1 = _make_func_node(name="func1")
     child1.quality = "complex"
@@ -535,7 +535,7 @@ def test_quality_rollup_complex_count():
 
 
 def test_quality_directory_returns_none():
-    from codedocent.analyzer import _score_quality
+    from codedocent.quality import _score_quality
 
     node = _make_dir_node(name="src")
     quality, warnings = _score_quality(node)
