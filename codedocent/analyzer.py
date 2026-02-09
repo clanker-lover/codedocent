@@ -22,6 +22,16 @@ CACHE_FILENAME = ".codedocent_cache.json"
 MAX_SOURCE_LINES = 200
 MIN_LINES_FOR_AI = 3
 
+# Quality scoring thresholds: (yellow_threshold, red_threshold)
+# yellow = "complex", red = "warning"
+LINE_THRESHOLDS: dict[str, tuple[int, int]] = {
+    "function": (50, 100),
+    "method": (50, 100),
+    "file": (500, 1000),
+    "class": (300, 600),
+}
+PARAM_THRESHOLD = 5
+
 
 def _count_nodes(node: CodeNode) -> int:
     """Recursive count of all nodes in tree."""
@@ -163,6 +173,11 @@ def _count_parameters(node: CodeNode) -> int:
     return count
 
 
+def _worst_quality(a: str, b: str) -> str:
+    order = {"clean": 0, "complex": 1, "warning": 2}
+    return a if order.get(a, 0) >= order.get(b, 0) else b
+
+
 def _score_quality(
     node: CodeNode,
 ) -> tuple[str | None, list[str] | None]:
@@ -190,27 +205,31 @@ def _score_quality(
                 if rank in ("A", "B"):
                     pass  # clean
                 elif rank == "C":
-                    quality = "complex"
-                    warnings.append(f"Cyclomatic complexity grade {rank}")
+                    quality = _worst_quality(quality, "complex")
+                    warnings.append(f"Moderate complexity (grade {rank}, score {worst})")
                 else:
-                    quality = "warning"
-                    warnings.append(f"High cyclomatic complexity grade {rank}")
+                    quality = _worst_quality(quality, "warning")
+                    warnings.append(f"High complexity (grade {rank}, score {worst})")
         except Exception:
             pass
 
-    # Heuristic: long function
-    if node.node_type in ("function", "method") and node.line_count > 50:
-        warnings.append("Long function: consider splitting")
+    # Line-count check (two-tier: yellow/red)
+    thresholds = LINE_THRESHOLDS.get(node.node_type)
+    if thresholds and node.line_count:
+        yellow, red = thresholds
+        if node.line_count > red:
+            quality = _worst_quality(quality, "warning")
+            warnings.append(f"This {node.node_type} is {node.line_count} lines long")
+        elif node.line_count > yellow:
+            quality = _worst_quality(quality, "complex")
+            warnings.append(f"Long {node.node_type}: {node.line_count} lines")
 
     # Heuristic: many parameters
     if node.node_type in ("function", "method"):
         param_count = _count_parameters(node)
-        if param_count > 5:
+        if param_count > PARAM_THRESHOLD:
+            quality = _worst_quality(quality, "complex")
             warnings.append("Many parameters: consider grouping")
-
-    # Escalate if heuristic warnings exist but quality is still clean
-    if warnings and quality == "clean":
-        quality = "complex"
 
     return quality, warnings if warnings else None
 
@@ -234,20 +253,52 @@ def _summarize_directory(node: CodeNode) -> None:
 
     node.summary = f"Contains {'; '.join(parts)}" if parts else "Empty directory"
 
-    # Quality = worst child quality
+    # Quality = worst child quality with descriptive rollup
     quality_order = {"warning": 2, "complex": 1, "clean": 0}
     worst = "clean"
-    all_warnings: list[str] = []
+    rollup_warnings: list[str] = []
+    complex_count = 0
+    warning_count = 0
     for child in node.children:
         if child.quality and quality_order.get(child.quality, 0) > quality_order.get(
             worst, 0
         ):
             worst = child.quality
-        if child.warnings:
-            all_warnings.extend(child.warnings)
+        if child.quality == "complex":
+            complex_count += 1
+        if child.quality == "warning":
+            warning_count += 1
+
+    if warning_count:
+        label = "child" if warning_count == 1 else "children"
+        rollup_warnings.append(f"Contains {warning_count} high-risk {label}")
+    if complex_count:
+        label = "child" if complex_count == 1 else "children"
+        rollup_warnings.append(f"{complex_count} complex {label} inside")
 
     node.quality = worst
-    node.warnings = all_warnings if all_warnings else None
+    node.warnings = rollup_warnings if rollup_warnings else None
+
+
+def _rollup_quality(node: CodeNode) -> None:
+    """Roll up child quality into a file or class node."""
+    if not node.children:
+        return
+    quality_order = {"warning": 2, "complex": 1, "clean": 0}
+    own_quality = node.quality or "clean"
+    own_warnings = list(node.warnings) if node.warnings else []
+    complex_count = sum(1 for c in node.children if c.quality == "complex")
+    warning_count = sum(1 for c in node.children if c.quality == "warning")
+    worst_child = "warning" if warning_count else ("complex" if complex_count else "clean")
+    if quality_order[worst_child] > quality_order.get(own_quality, 0):
+        node.quality = worst_child
+    if warning_count:
+        label = "function" if warning_count == 1 else "functions"
+        own_warnings.append(f"Contains {warning_count} high-risk {label}")
+    if complex_count:
+        label = "function" if complex_count == 1 else "functions"
+        own_warnings.append(f"{complex_count} complex {label} inside")
+    node.warnings = own_warnings if own_warnings else None
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +504,12 @@ def analyze(root: CodeNode, model: str = "qwen3:14b", workers: int = 1) -> CodeN
             node.quality = quality
             node.warnings = warnings
 
+        # Phase 1b: Rollup quality to files and classes (deepest first)
+        rollup_nodes = [(n, d) for n, d in all_nodes if n.node_type in ("file", "class")]
+        rollup_nodes.sort(key=lambda x: x[1], reverse=True)
+        for node, _depth in rollup_nodes:
+            _rollup_quality(node)
+
         # Phase 2: AI-analyze files (shallowest first)
         files = [(n, d) for n, d in all_nodes if n.node_type == "file"]
         files.sort(key=lambda x: x[1])
@@ -520,6 +577,9 @@ def analyze_no_ai(root: CodeNode) -> CodeNode:
 
         for child in node.children:
             _walk(child)
+
+        if node.node_type in ("file", "class"):
+            _rollup_quality(node)
 
         if node.node_type == "directory":
             _summarize_directory(node)

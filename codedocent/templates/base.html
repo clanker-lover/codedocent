@@ -103,6 +103,12 @@ body {
     flex-shrink: 0;
 }
 
+.cd-node__warning-text {
+    font-size: 11px;
+    color: #B8860B;
+    font-style: italic;
+}
+
 .cd-node__body {
     padding: 0 14px 10px;
 }
@@ -273,6 +279,9 @@ body {
         {% else %}
         <span class="cd-node__quality">🟢</span>
         {% endif %}
+        {% if node.warnings %}
+        <span class="cd-node__warning-text">{{ node.warnings | join('; ') }}</span>
+        {% endif %}
     </div>
     <div class="cd-node__body">
         {% if node.imports %}
@@ -294,7 +303,7 @@ body {
             <pre class="cd-pseudocode__code">{{ node.pseudocode }}</pre>
         </div>
         {% endif %}
-        {% if node.warnings and node.node_type in ('function', 'method') %}
+        {% if node.warnings %}
         <div class="cd-warnings">
             {% for w in node.warnings %}
             <div class="cd-warnings__item">⚠️ {{ w }}</div>

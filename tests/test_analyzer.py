@@ -402,3 +402,142 @@ def test_garbage_response_fallback(mock_ollama, tmp_path):
 
     # Should get fallback summary
     assert node.summary == "Could not generate summary"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: Quality scoring enhancement tests
+# ---------------------------------------------------------------------------
+
+
+def test_quality_function_yellow_tier():
+    from codedocent.analyzer import _score_quality
+
+    # 60-line function (above 50 yellow, below 100 red)
+    lines = ["def long_func():"]
+    for i in range(59):
+        lines.append(f"    x = {i}")
+    source = "\n".join(lines) + "\n"
+
+    node = _make_func_node(name="long_func", source=source)
+    node.line_count = 60
+    quality, warnings = _score_quality(node)
+    assert quality == "complex"
+    assert warnings is not None
+    assert any("60 lines" in w for w in warnings)
+
+
+def test_quality_function_red_tier():
+    from codedocent.analyzer import _score_quality
+
+    # 110-line function (above 100 red)
+    lines = ["def very_long_func():"]
+    for i in range(109):
+        lines.append(f"    x = {i}")
+    source = "\n".join(lines) + "\n"
+
+    node = _make_func_node(name="very_long_func", source=source)
+    node.line_count = 110
+    quality, warnings = _score_quality(node)
+    assert quality == "warning"
+    assert warnings is not None
+    assert any("110 lines" in w for w in warnings)
+
+
+def test_quality_file_yellow_tier():
+    from codedocent.analyzer import _score_quality
+
+    # 550-line file (above 500 yellow, below 1000 red)
+    lines = [f"x_{i} = {i}" for i in range(550)]
+    source = "\n".join(lines) + "\n"
+
+    node = _make_file_node(name="big.py", source=source)
+    node.line_count = 550
+    quality, warnings = _score_quality(node)
+    assert quality == "complex"
+    assert warnings is not None
+    assert any("550 lines" in w for w in warnings)
+
+
+def test_quality_file_red_tier():
+    from codedocent.analyzer import _score_quality
+
+    # 1100-line file (above 1000 red)
+    lines = [f"x_{i} = {i}" for i in range(1100)]
+    source = "\n".join(lines) + "\n"
+
+    node = _make_file_node(name="huge.py", source=source)
+    node.line_count = 1100
+    quality, warnings = _score_quality(node)
+    assert quality == "warning"
+    assert warnings is not None
+    assert any("1100 lines" in w for w in warnings)
+
+
+def test_quality_class_yellow_tier():
+    from codedocent.analyzer import _score_quality
+
+    # 311-line class (above 300 yellow, below 600 red)
+    lines = ["class BigClass:"]
+    for i in range(310):
+        lines.append(f"    x_{i} = {i}")
+    source = "\n".join(lines) + "\n"
+
+    node = CodeNode(
+        name="BigClass",
+        node_type="class",
+        language="python",
+        filepath="test.py",
+        start_line=1,
+        end_line=311,
+        source=source,
+        line_count=311,
+    )
+    quality, warnings = _score_quality(node)
+    assert quality == "complex"
+
+
+def test_quality_rollup_to_file():
+    from codedocent.analyzer import _rollup_quality
+
+    child = _make_func_node(name="bad_func")
+    child.quality = "warning"
+    child.warnings = ["Some warning"]
+
+    file_node = _make_file_node(name="test.py", children=[child])
+    file_node.quality = "clean"
+    file_node.warnings = None
+
+    _rollup_quality(file_node)
+    assert file_node.quality == "warning"
+    assert file_node.warnings is not None
+    assert any("high-risk" in w for w in file_node.warnings)
+
+
+def test_quality_rollup_complex_count():
+    from codedocent.analyzer import _rollup_quality
+
+    child1 = _make_func_node(name="func1")
+    child1.quality = "complex"
+    child1.warnings = ["Long function: 60 lines"]
+
+    child2 = _make_func_node(name="func2")
+    child2.quality = "complex"
+    child2.warnings = ["Long function: 70 lines"]
+
+    file_node = _make_file_node(name="test.py", children=[child1, child2])
+    file_node.quality = "clean"
+    file_node.warnings = None
+
+    _rollup_quality(file_node)
+    assert file_node.quality == "complex"
+    assert file_node.warnings is not None
+    assert any("2 complex" in w for w in file_node.warnings)
+
+
+def test_quality_directory_returns_none():
+    from codedocent.analyzer import _score_quality
+
+    node = _make_dir_node(name="src")
+    quality, warnings = _score_quality(node)
+    assert quality is None
+    assert warnings is None

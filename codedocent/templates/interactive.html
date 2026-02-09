@@ -151,6 +151,12 @@ body {
     flex-shrink: 0;
 }
 
+.cd-node__warning-text {
+    font-size: 11px;
+    color: #B8860B;
+    font-style: italic;
+}
+
 .cd-node__body {
     padding: 0 14px 10px;
     display: none;
@@ -547,6 +553,13 @@ function renderNode(node, depth) {
     quality.textContent = qualityEmoji(node.quality);
     header.appendChild(quality);
 
+    if (node.warnings && node.warnings.length > 0) {
+        const warningText = document.createElement('span');
+        warningText.className = 'cd-node__warning-text';
+        warningText.textContent = node.warnings.join('; ');
+        header.appendChild(warningText);
+    }
+
     el.appendChild(header);
 
     // Body
@@ -589,7 +602,7 @@ function renderNode(node, depth) {
     }
 
     // Warnings
-    if (node.warnings && node.warnings.length > 0 && (node.node_type === 'function' || node.node_type === 'method')) {
+    if (node.warnings && node.warnings.length > 0) {
         const w = document.createElement('div');
         w.className = 'cd-warnings';
         w.innerHTML = node.warnings.map(
@@ -699,7 +712,7 @@ function analyzeNode(nodeId, linkEl, bodyEl) {
                 }
 
                 // Add warnings if present
-                if (data.warnings && data.warnings.length > 0 && (data.node_type === 'function' || data.node_type === 'method')) {
+                if (data.warnings && data.warnings.length > 0) {
                     const w = document.createElement('div');
                     w.className = 'cd-warnings';
                     w.innerHTML = data.warnings.map(
@@ -713,6 +726,18 @@ function analyzeNode(nodeId, linkEl, bodyEl) {
                     const nodeEl = bodyEl.closest('.cd-node');
                     const qEl = nodeEl.querySelector('.cd-node__quality');
                     if (qEl) qEl.textContent = qualityEmoji(data.quality);
+                }
+
+                // Update inline warning text
+                if (data.warnings && data.warnings.length > 0) {
+                    const nodeEl = bodyEl.closest('.cd-node');
+                    let wt = nodeEl.querySelector('.cd-node__warning-text');
+                    if (!wt) {
+                        wt = document.createElement('span');
+                        wt.className = 'cd-node__warning-text';
+                        nodeEl.querySelector('.cd-node__header').appendChild(wt);
+                    }
+                    wt.textContent = data.warnings.join('; ');
                 }
 
                 // Add code export buttons
