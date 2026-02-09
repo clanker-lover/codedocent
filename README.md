@@ -15,7 +15,7 @@ Codedocent takes any codebase and turns it into a visual, navigable map that any
 Every piece of code becomes a **block** that shows:
 - A **plain English explanation** of what it does
 - A **pseudocode translation** (simplified logic, not real syntax)
-- **Quality warnings** (complexity, security, style issues)
+- **Quality warnings** with explanatory text (complexity, line count, parameter count)
 - The **actual source code** (hidden by default, expandable)
 
 Blocks are **nested** — directories contain files, files contain classes, classes contain functions. Click to drill down. Breadcrumbs to navigate back up. Color-coded by language.
@@ -104,27 +104,26 @@ Codedocent works with any model from the [Ollama library](https://ollama.com/lib
 
 ## Quality indicators
 
-Each block shows a quality badge based on static analysis:
+Each block shows a quality badge based on static analysis, with warnings that explain *why* — not just colored dots.
 
 | Badge | Meaning |
 |-------|---------|
 | 🟢 Clean | Low complexity, no warnings |
-| 🟡 Complex | Moderate complexity or style warnings |
-| 🔴 Warning | High complexity, many issues |
+| 🟡 Complex | Moderate complexity, long functions, or many parameters |
+| 🔴 Warning | High complexity or very long code |
+
+Warnings roll up through the tree: a file inherits the worst quality of its functions, and a directory inherits the worst quality of its files. Each level shows a count of problematic children (e.g., "Contains 2 high-risk functions"). Quality scoring works for all supported languages — Python files also get [radon](https://radon.readthedocs.io/) cyclomatic complexity analysis.
 
 ## Current status
 
-**Phase 5 of 8 complete — working MVP.**
-
 - ✅ Scanner, parser, renderer, analyzer, server, CLI — all built and tested
-- ✅ Code export with Show Code, Export Code, and Copy for AI buttons
-- ✅ 57 tests passing
 - ✅ Interactive navigation with lazy AI analysis
-- ✅ Static HTML full-analysis mode
-- ✅ Parallel workers for batch analysis
-- ✅ Code export — Show Code, Export Code, Copy for AI (Phase 5)
-- 🔲 Code replacement (Phase 7)
-- 🔲 pip packaging (Phase 8)
+- ✅ Static HTML full-analysis mode with parallel workers
+- ✅ Code export — Show Code, Export Code, Copy for AI
+- ✅ Quality scoring with two-tier thresholds and warning rollup across the tree
+- ✅ pip-installable package with `codedocent` CLI entry point
+- ✅ 65 tests passing
+- ✅ Code quality: pylint 10/10, bandit/flake8/mypy all clean
 
 ## License
 
