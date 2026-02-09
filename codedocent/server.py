@@ -156,7 +156,16 @@ def _analyze_node(node_id: str) -> dict | None:
         if node.summary is None:
             from codedocent.analyzer import analyze_single_node  # pylint: disable=import-outside-toplevel  # noqa: E501
 
-            analyze_single_node(node, _Handler.model, _Handler.cache_dir)
+            try:
+                analyze_single_node(
+                    node, _Handler.model, _Handler.cache_dir,
+                )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                print(
+                    f"analyze error for {node_id}: {exc}",
+                    file=sys.stderr, flush=True,
+                )
+                node.summary = f"Analysis failed: {exc}"
     return _node_to_dict(node, include_source=True)
 
 
@@ -180,18 +189,19 @@ def _execute_replace(  # pylint: disable=too-many-return-statements
     if not isinstance(new_source, str):
         return (400, {"success": False, "error": "source must be a string"})
     abs_path = _resolve_filepath(node, _Handler.cache_dir)
-    escape_err = "Path escapes project directory"
-    if os.path.islink(abs_path):
-        return (403, {"success": False, "error": escape_err})
     real_path = os.path.realpath(abs_path)
     real_root = os.path.realpath(_Handler.cache_dir)
     inside = real_path == real_root or real_path.startswith(
         real_root + os.sep,
     )
     if not inside:
-        return (403, {"success": False, "error": escape_err})
+        return (
+            403,
+            {"success": False, "error": "Path escapes project directory"},
+        )
     from codedocent.editor import replace_block_source  # pylint: disable=import-outside-toplevel  # noqa: E501
 
+    tree_stale = False
     with _Handler.analyze_lock:
         result = replace_block_source(
             abs_path, node.start_line, node.end_line, new_source,
@@ -200,7 +210,14 @@ def _execute_replace(  # pylint: disable=too-many-return-statements
             _update_node_after_replace(
                 node, new_source, result, _Handler.cache_dir,
             )
-            _refresh_file_nodes(node)
+            try:
+                _refresh_file_nodes(node)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                print(
+                    f"refresh warning for {node_id}: {exc}",
+                    file=sys.stderr, flush=True,
+                )
+                tree_stale = True
     if not result["success"]:
         err = result.get("error", "")
         if "modified externally" in err:
@@ -212,6 +229,8 @@ def _execute_replace(  # pylint: disable=too-many-return-statements
         )):
             return (400, result)
         return (500, result)
+    if tree_stale:
+        result["tree_stale"] = True
     return (200, result)
 
 
@@ -240,11 +259,20 @@ class _Handler(BaseHTTPRequestHandler):
         self._touch()
         if self.path == "/":
             self._serve_html()
-        elif self.path == "/api/tree":
-            self._serve_tree()
-        elif self.path.startswith("/api/source/"):
-            node_id = self.path[len("/api/source/"):]
-            self._handle_source(node_id)
+        elif self.path.startswith("/api/"):
+            token = self.headers.get("X-Codedocent-Token", "")
+            if token != _Handler.csrf_token:
+                self._send_json(
+                    403, {"error": "Invalid or missing CSRF token"},
+                )
+                return
+            if self.path == "/api/tree":
+                self._serve_tree()
+            elif self.path.startswith("/api/source/"):
+                node_id = self.path[len("/api/source/"):]
+                self._handle_source(node_id)
+            else:
+                self.send_error(404)
         else:
             self.send_error(404)
 
@@ -278,11 +306,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, _node_to_dict(_Handler.root))
 
     def _handle_source(self, node_id: str):
-        if node_id not in _Handler.node_lookup:
+        with _Handler.analyze_lock:
+            node = _Handler.node_lookup.get(node_id)
+            source = node.source or "" if node is not None else None
+        if source is None:
             self.send_error(404, "Unknown node ID")
             return
-        node = _Handler.node_lookup[node_id]
-        self._send_json(200, {"source": node.source or ""})
+        self._send_json(200, {"source": source})
 
     def _handle_analyze(self, node_id: str):
         result = _analyze_node(node_id)
@@ -293,18 +323,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_replace(self, node_id: str):
         cl_header = self.headers.get("Content-Length")
-        if cl_header is None:
-            self._send_json(
-                400, {"success": False,
-                      "error": "Missing Content-Length"},
-            )
-            return
         try:
+            if cl_header is None:
+                raise ValueError("missing")
             content_length = int(cl_header)
-        except ValueError:
+            if content_length < 0:
+                raise ValueError("negative")
+        except (TypeError, ValueError):
+            label = "Missing" if cl_header is None else "Invalid"
             self._send_json(
                 400, {"success": False,
-                      "error": "Invalid Content-Length"},
+                      "error": f"{label} Content-Length"},
             )
             return
         if content_length > MAX_BODY_SIZE:
@@ -331,7 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             status, result = _execute_replace(node_id, body)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             print(f"replace error: {sys.exc_info()[1]}", file=sys.stderr, flush=True)
             self._send_json(500, {"success": False, "error": "Internal server error"})
             return

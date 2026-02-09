@@ -555,7 +555,9 @@ function cdFetchSource(nodeId, callback) {
         callback(sourceCache[nodeId]);
         return;
     }
-    fetch('/api/source/' + nodeId)
+    fetch('/api/source/' + nodeId, {
+        headers: {'X-Codedocent-Token': CSRF_TOKEN}
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.source) {

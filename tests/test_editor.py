@@ -176,16 +176,17 @@ def test_multiple_saves_create_multiple_backups(tmp_path: Path) -> None:
 
 
 def test_external_modification_detected(tmp_path: Path) -> None:
-    """Fix 9: stale mtime triggers OSError."""
+    """Fix 9: stale mtime/size triggers OSError."""
     p = _write_sample(tmp_path)
-    lines, error, mtime, line_ending = _read_and_validate(str(p), 1, 5)
+    lines, error, file_stamp, line_ending = _read_and_validate(str(p), 1, 5)
     assert lines is not None
 
-    # Simulate external modification by changing mtime
-    os.utime(str(p), (mtime + 10, mtime + 10))
+    # Simulate external modification by appending data (changes both
+    # mtime_ns and size)
+    p.write_text(SAMPLE_CONTENT + "extra\n", encoding="utf-8")
 
     with pytest.raises(OSError, match="modified externally"):
-        _write_with_backup(str(p), lines, mtime)
+        _write_with_backup(str(p), lines, file_stamp)
 
 
 def test_crlf_line_endings_preserved(tmp_path: Path) -> None:
@@ -215,7 +216,7 @@ def test_backup_verification_failure(tmp_path: Path) -> None:
     "Backup creation failed" path we must also remove the placeholder.
     """
     p = _write_sample(tmp_path)
-    lines, error, mtime, line_ending = _read_and_validate(str(p), 1, 5)
+    lines, error, file_stamp, line_ending = _read_and_validate(str(p), 1, 5)
     assert lines is not None
 
     original = p.read_text(encoding="utf-8")
@@ -226,7 +227,7 @@ def test_backup_verification_failure(tmp_path: Path) -> None:
 
     with patch("codedocent.editor.shutil.copy2", side_effect=_fake_copy2):
         with pytest.raises(OSError, match="Backup creation"):
-            _write_with_backup(str(p), lines, mtime)
+            _write_with_backup(str(p), lines, file_stamp)
 
     # Original file must be untouched
     assert p.read_text(encoding="utf-8") == original

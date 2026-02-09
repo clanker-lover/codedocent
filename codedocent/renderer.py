@@ -77,5 +77,5 @@ def render_interactive(  # nosec B107
         autoescape=True,
     )
     template = env.get_template("interactive.html")
-    tree_json = json.dumps(_node_to_dict(root))
+    tree_json = json.dumps(_node_to_dict(root)).replace("</", r"<\/")
     return template.render(tree_json=tree_json, csrf_token=csrf_token)

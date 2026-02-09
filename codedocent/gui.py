@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404
 import sys
+import threading
 
 from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 
@@ -41,19 +42,35 @@ def _create_folder_row(frame: ttk.Frame) -> tk.StringVar:
     return folder_var
 
 
-def _create_model_row(frame: ttk.Frame) -> tk.StringVar:
+def _create_model_row(
+    frame: ttk.Frame, root: tk.Tk,
+) -> tk.StringVar:
     """Create the model-dropdown row and return the StringVar."""
     ttk.Label(frame, text="Model:").grid(
         row=2, column=0, sticky="w", pady=(12, 4),
     )
-    ollama_ok = _check_ollama()
-    models = _fetch_ollama_models() if ollama_ok else []
-    model_values = models if models else ["No AI"]
-    model_var = tk.StringVar(value=model_values[0])
-    ttk.Combobox(
-        frame, textvariable=model_var, values=model_values,
+    model_var = tk.StringVar(value="Checking...")
+    combo = ttk.Combobox(
+        frame, textvariable=model_var, values=["Checking..."],
         state="readonly", width=37,
-    ).grid(row=3, column=0, columnspan=2, sticky="ew")
+    )
+    combo.grid(row=3, column=0, columnspan=2, sticky="ew")
+
+    def _bg_fetch() -> None:
+        try:
+            ollama_ok = _check_ollama()
+            models = _fetch_ollama_models() if ollama_ok else []
+        except Exception:  # pylint: disable=broad-exception-caught
+            models = []
+        model_values = models if models else ["No AI"]
+
+        def _update_ui() -> None:
+            combo["values"] = model_values
+            model_var.set(model_values[0])
+
+        root.after(0, _update_ui)
+
+    threading.Thread(target=_bg_fetch, daemon=True).start()
     return model_var
 
 
@@ -90,6 +107,8 @@ def _create_go_button(
         cmd = [sys.executable, "-m", "codedocent", folder]
 
         selected_model = model_var.get()
+        if selected_model == "Checking...":
+            return
         if selected_model == "No AI":
             cmd.append("--no-ai")
         else:
@@ -119,7 +138,7 @@ def _build_gui() -> None:
     frame.grid(row=0, column=0, sticky="nsew")
 
     folder_var = _create_folder_row(frame)
-    model_var = _create_model_row(frame)
+    model_var = _create_model_row(frame, root)
     mode_var = _create_mode_row(frame)
     _create_go_button(frame, root, folder_var, model_var, mode_var)
 

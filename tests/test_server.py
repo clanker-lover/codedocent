@@ -193,7 +193,7 @@ def test_get_root_returns_html(server_fixture):
 def test_get_tree_returns_json(server_fixture):
     port, _, _ = server_fixture
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("GET", "/api/tree")
+    conn.request("GET", "/api/tree", headers=_post_headers())
     resp = conn.getresponse()
     assert resp.status == 200
     data = json.loads(resp.read())
@@ -380,7 +380,7 @@ def test_get_source_returns_source(server_fixture):
     func_node.summary = None
 
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("GET", "/api/source/abc123def456")
+    conn.request("GET", "/api/source/abc123def456", headers=_post_headers())
     resp = conn.getresponse()
     assert resp.status == 200
     data = json.loads(resp.read())
@@ -395,7 +395,9 @@ def test_get_source_returns_source(server_fixture):
 def test_get_source_unknown_node_returns_404(server_fixture):
     port, _, _ = server_fixture
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("GET", "/api/source/nonexistent999")
+    conn.request(
+        "GET", "/api/source/nonexistent999", headers=_post_headers(),
+    )
     resp = conn.getresponse()
     assert resp.status == 404
     conn.close()
@@ -404,6 +406,17 @@ def test_get_source_unknown_node_returns_404(server_fixture):
 # ---------------------------------------------------------------------------
 # CSRF token tests
 # ---------------------------------------------------------------------------
+
+
+def test_get_api_without_csrf_token_returns_403(server_fixture):
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/api/tree")
+    resp = conn.getresponse()
+    assert resp.status == 403
+    data = json.loads(resp.read())
+    assert "CSRF" in data["error"]
+    conn.close()
 
 
 def test_post_without_csrf_token_returns_403(server_fixture):
@@ -460,9 +473,9 @@ def test_post_with_correct_csrf_token_succeeds(server_fixture):
 def test_symlink_replace_rejected(server_fixture, tmp_path):
     port, root, lookup = server_fixture
 
-    # Create a target file outside tmp_path
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    # Create a target file truly outside the project root (tmp_path)
+    outside = tmp_path.parent / "symlink_escape_target"
+    outside.mkdir(exist_ok=True)
     target = outside / "secret.py"
     target.write_text("secret = True\n", encoding="utf-8")
 

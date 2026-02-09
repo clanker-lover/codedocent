@@ -29,6 +29,14 @@ MAX_SOURCE_LINES = 200
 MIN_LINES_FOR_AI = 3
 
 
+def _md5(data: bytes) -> "hashlib._Hash":
+    """Create an MD5 hash, tolerating FIPS-mode Python builds."""
+    try:
+        return hashlib.md5(data, usedforsecurity=False)
+    except TypeError:
+        return hashlib.md5(data)  # nosec B324
+
+
 def _count_nodes(node: CodeNode) -> int:
     """Recursive count of all nodes in tree."""
     return 1 + sum(_count_nodes(c) for c in node.children)
@@ -128,7 +136,10 @@ def _summarize_with_ai(
         pool.shutdown(wait=False, cancel_futures=True)
         return None
     pool.shutdown(wait=False)
-    raw = response.message.content or ""  # pylint: disable=no-member
+    msg = getattr(response, "message", None)
+    if msg is None:
+        raise ValueError("Unexpected Ollama response format")
+    raw = getattr(msg, "content", None) or ""
     raw = _strip_think_tags(raw)
     # Garbage response fallback: empty or very short after stripping
     if not raw or len(raw) < 10:
@@ -147,9 +158,7 @@ def _summarize_with_ai(
 
 def _cache_key(node: CodeNode) -> str:
     """Generate a cache key based on filepath, name, and source hash."""
-    source_hash = hashlib.md5(
-        node.source.encode(), usedforsecurity=False
-    ).hexdigest()
+    source_hash = _md5(node.source.encode()).hexdigest()
     return f"{node.filepath}::{node.name}::{source_hash}"
 
 
@@ -210,9 +219,7 @@ def assign_node_ids(root: CodeNode) -> dict[str, CodeNode]:
 
     def _walk(node: CodeNode, path_parts: list[str]) -> None:
         key = "::".join(path_parts)
-        node_id = hashlib.md5(
-            key.encode(), usedforsecurity=False
-        ).hexdigest()[:12]
+        node_id = _md5(key.encode()).hexdigest()[:12]
         node.node_id = node_id
         lookup[node_id] = node
         for child in node.children:
@@ -276,7 +283,10 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
         node.pseudocode = pseudocode
         cache["entries"][key] = {"summary": summary, "pseudocode": pseudocode}
         _save_cache(cache_path, cache)
-    except (ConnectionError, RuntimeError, ValueError, OSError) as e:
+    except (
+        ConnectionError, RuntimeError, ValueError,
+        OSError, AttributeError, TypeError,
+    ) as e:
         node.summary = f"Summary generation failed: {e}"
 
 

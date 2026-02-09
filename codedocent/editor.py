@@ -10,14 +10,14 @@ from datetime import datetime
 
 def _read_and_validate(
     filepath: str, start_line: int, end_line: int,
-) -> tuple[list[str] | None, str | None, float, str]:
+) -> tuple[list[str] | None, str | None, tuple[int, int], str]:
     """Read *filepath* and validate the line range.
 
-    Returns ``(lines, None, mtime, line_ending)`` on success, or
-    ``(None, error_message, 0.0, "\\n")`` on failure.
+    Returns ``(lines, None, (mtime_ns, size), line_ending)`` on success,
+    or ``(None, error_message, (0, 0), "\\n")`` on failure.
     """
     if not os.path.isfile(filepath):
-        return (None, f"File not found: {filepath}", 0.0, "\n")
+        return (None, f"File not found: {filepath}", (0, 0), "\n")
     if (
         not isinstance(start_line, int)
         or not isinstance(end_line, int)
@@ -28,15 +28,16 @@ def _read_and_validate(
         return (
             None,
             f"Invalid line range: {start_line}-{end_line}",
-            0.0, "\n",
+            (0, 0), "\n",
         )
     try:
         with open(filepath, "rb") as f:
             raw = f.read()
-        mtime = os.stat(filepath).st_mtime
+        _stat = os.stat(filepath)
+        file_stamp = (_stat.st_mtime_ns, _stat.st_size)
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return (None, "File is not valid UTF-8 text", 0.0, "\n")
+        return (None, "File is not valid UTF-8 text", (0, 0), "\n")
 
     # Detect line ending style: CRLF vs LF
     crlf_count = text.count("\r\n")
@@ -49,20 +50,22 @@ def _read_and_validate(
             None,
             f"end_line {end_line} exceeds file length"
             f" ({len(lines)} lines)",
-            0.0, "\n",
+            (0, 0), "\n",
         )
-    return (lines, None, mtime, line_ending)
+    return (lines, None, file_stamp, line_ending)
 
 
 def _write_with_backup(
-    filepath: str, lines: list[str], mtime: float,
+    filepath: str, lines: list[str], file_stamp: tuple[int, int],
 ) -> None:
     """Create a timestamped ``.bak`` backup and write *lines* back.
 
+    *file_stamp* is ``(st_mtime_ns, st_size)`` from the initial read.
     Raises ``OSError`` if the file was modified externally since the
     last read, if the backup could not be created, or on write failure.
     """
-    if os.stat(filepath).st_mtime != mtime:
+    _stat = os.stat(filepath)
+    if (_stat.st_mtime_ns, _stat.st_size) != file_stamp:
         raise OSError("File was modified externally since last read")
 
     now = datetime.now()
@@ -137,7 +140,7 @@ def replace_block_source(
     if not isinstance(new_source, str):
         return {"success": False, "error": "new_source must be a string"}
 
-    lines, error, mtime, line_ending = _read_and_validate(
+    lines, error, file_stamp, line_ending = _read_and_validate(
         filepath, start_line, end_line,
     )
     if lines is None:
@@ -158,7 +161,7 @@ def replace_block_source(
         new_count = len(new_lines)
         lines[start_line - 1:end_line] = new_lines
 
-        _write_with_backup(filepath, lines, mtime)
+        _write_with_backup(filepath, lines, file_stamp)
 
         return {
             "success": True,
