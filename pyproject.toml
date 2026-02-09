@@ -20,5 +20,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
+[tool.setuptools.package-data]
+codedocent = ["templates/*.html"]
+
 [project.scripts]
 codedocent = "codedocent.cli:main"
