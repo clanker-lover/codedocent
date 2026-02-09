@@ -334,6 +334,43 @@ body {
         padding-left: 8px;
     }
 }
+
+.cd-replace-panel {
+    margin-bottom: 8px;
+}
+.cd-replace-panel textarea {
+    width: 100%;
+    min-height: 120px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    background: #1E1E2E;
+    color: #D4D4D4;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 12px;
+    line-height: 1.5;
+    resize: vertical;
+    box-sizing: border-box;
+}
+.cd-replace-panel__btns {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+.cd-replace-msg {
+    font-size: 12px;
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.cd-replace-msg--ok {
+    background: #2E7D32;
+    color: #FFF;
+}
+.cd-replace-msg--err {
+    background: #C62828;
+    color: #FFF;
+}
 </style>
 </head>
 <body>
@@ -489,6 +526,19 @@ function cdCreateCodeActions(bodyEl, nodeId, nodeType, nodeName, filepath, langu
     });
     actions.appendChild(btnAI);
 
+    if (nodeType === 'function' || nodeType === 'method' || nodeType === 'class') {
+        var btnReplace = document.createElement('button');
+        btnReplace.className = 'cd-code-btn';
+        btnReplace.textContent = 'Replace Code';
+        btnReplace.addEventListener('click', function(e) {
+            e.stopPropagation();
+            ensureSource(function(source) {
+                cdShowReplacePanel(bodyEl, nodeId, source, pre, btnShow);
+            });
+        });
+        actions.appendChild(btnReplace);
+    }
+
     var childrenEl = bodyEl.querySelector('.cd-node__children');
     if (childrenEl) {
         bodyEl.insertBefore(actions, childrenEl);
@@ -496,6 +546,88 @@ function cdCreateCodeActions(bodyEl, nodeId, nodeType, nodeName, filepath, langu
     } else {
         bodyEl.appendChild(actions);
         bodyEl.appendChild(pre);
+    }
+}
+
+function cdShowReplacePanel(bodyEl, nodeId, currentSource, pre, btnShow) {
+    // Remove existing panel if any
+    var existing = bodyEl.querySelector('.cd-replace-panel');
+    if (existing) { existing.remove(); return; }
+
+    var panel = document.createElement('div');
+    panel.className = 'cd-replace-panel';
+
+    var ta = document.createElement('textarea');
+    ta.value = currentSource;
+    ta.addEventListener('click', function(e) { e.stopPropagation(); });
+    panel.appendChild(ta);
+
+    var btns = document.createElement('div');
+    btns.className = 'cd-replace-panel__btns';
+
+    var btnConfirm = document.createElement('button');
+    btnConfirm.className = 'cd-code-btn';
+    btnConfirm.textContent = 'Confirm Replace';
+    btnConfirm.addEventListener('click', function(e) {
+        e.stopPropagation();
+        btnConfirm.disabled = true;
+        btnConfirm.textContent = 'Replacing...';
+        fetch('/api/replace/' + nodeId, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source: ta.value})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                // Update source display and cache
+                pre.textContent = ta.value;
+                pre.dataset.loaded = 'true';
+                delete sourceCache[nodeId];
+                // Show success message
+                var msg = document.createElement('div');
+                msg.className = 'cd-replace-msg cd-replace-msg--ok';
+                msg.textContent = 'Replaced! (' + data.lines_before
+                    + ' \u2192 ' + data.lines_after + ' lines)';
+                panel.appendChild(msg);
+                setTimeout(function() { panel.remove(); }, 2000);
+            } else {
+                var msg = document.createElement('div');
+                msg.className = 'cd-replace-msg cd-replace-msg--err';
+                msg.textContent = 'Error: ' + data.error;
+                panel.appendChild(msg);
+                btnConfirm.disabled = false;
+                btnConfirm.textContent = 'Confirm Replace';
+            }
+        })
+        .catch(function(err) {
+            var msg = document.createElement('div');
+            msg.className = 'cd-replace-msg cd-replace-msg--err';
+            msg.textContent = 'Network error';
+            panel.appendChild(msg);
+            btnConfirm.disabled = false;
+            btnConfirm.textContent = 'Confirm Replace';
+        });
+    });
+    btns.appendChild(btnConfirm);
+
+    var btnCancel = document.createElement('button');
+    btnCancel.className = 'cd-code-btn';
+    btnCancel.textContent = 'Cancel';
+    btnCancel.addEventListener('click', function(e) {
+        e.stopPropagation();
+        panel.remove();
+    });
+    btns.appendChild(btnCancel);
+
+    panel.appendChild(btns);
+
+    // Insert panel after the actions bar
+    var actionsEl = bodyEl.querySelector('.cd-code-actions');
+    if (actionsEl && actionsEl.nextSibling) {
+        bodyEl.insertBefore(panel, actionsEl.nextSibling);
+    } else {
+        bodyEl.appendChild(panel);
     }
 }
 

@@ -119,6 +119,9 @@ def start_server(  # pylint: disable=too-many-locals,too-many-statements
             elif self.path.startswith("/api/analyze/"):
                 node_id = self.path[len("/api/analyze/"):]
                 self._handle_analyze(node_id)
+            elif self.path.startswith("/api/replace/"):
+                node_id = self.path[len("/api/replace/"):]
+                self._handle_replace(node_id)
             else:
                 self.send_error(404)
 
@@ -168,6 +171,82 @@ def start_server(  # pylint: disable=too-many-locals,too-many-statements
             result = _node_to_dict(node, include_source=True)
             data = json.dumps(result).encode("utf-8")
             self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _handle_replace(self, node_id: str):
+            if node_id not in node_lookup:
+                self.send_error(404, "Unknown node ID")
+                return
+
+            node = node_lookup[node_id]
+
+            if node.node_type in ("directory", "file"):
+                self._send_json(
+                    400,
+                    {"success": False,
+                     "error": "Cannot replace directory/file blocks"},
+                )
+                return
+
+            content_length = int(self.headers["Content-Length"])
+            body = json.loads(self.rfile.read(content_length))
+            new_source = body.get("source", "")
+
+            if not isinstance(new_source, str):
+                self._send_json(
+                    400,
+                    {"success": False, "error": "source must be a string"},
+                )
+                return
+
+            # Resolve filepath
+            import os as _os  # pylint: disable=import-outside-toplevel
+
+            filepath = node.filepath or ""
+            if _os.path.isabs(filepath):
+                abs_path = filepath
+            else:
+                abs_path = _os.path.join(cache_dir, filepath)
+
+            from codedocent.editor import replace_block_source  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+            with analyze_lock:
+                result = replace_block_source(
+                    abs_path, node.start_line, node.end_line, new_source,
+                )
+
+                if result["success"]:
+                    # Update in-memory node
+                    new_line_count = result["lines_after"]
+                    node.source = new_source
+                    node.line_count = new_line_count
+                    node.end_line = node.start_line + new_line_count - 1
+
+                    # Clear cached analysis
+                    node.summary = None
+                    node.pseudocode = None
+                    node.quality = None
+                    node.warnings = None
+
+                    # Invalidate AI cache entry
+                    from codedocent.analyzer import (  # pylint: disable=import-outside-toplevel  # noqa: E501
+                        _cache_key, _load_cache, _save_cache, CACHE_FILENAME,
+                    )
+
+                    cache_path = _os.path.join(cache_dir, CACHE_FILENAME)
+                    cache = _load_cache(cache_path)
+                    old_key = _cache_key(node)
+                    cache.get("entries", {}).pop(old_key, None)
+                    _save_cache(cache_path, cache)
+
+            self._send_json(200, result)
+
+        def _send_json(self, status_code: int, obj: dict):
+            data = json.dumps(obj).encode("utf-8")
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()

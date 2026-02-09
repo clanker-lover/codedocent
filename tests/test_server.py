@@ -262,3 +262,79 @@ def test_analyze_response_includes_source(server_fixture):
     assert "source" in data
     assert "def add" in data["source"]
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Replace endpoint integration tests
+# ---------------------------------------------------------------------------
+
+
+def _write_func_file(tmp_path):
+    """Write a real file matching the func node's filepath for replacement."""
+    p = tmp_path / "test.py"
+    p.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    return p
+
+
+def test_replace_unknown_node_returns_404(server_fixture):
+    port, _, _ = server_fixture
+    body = json.dumps({"source": "pass"}).encode()
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/nonexistent999",
+        body=body,
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 404
+    conn.close()
+
+
+def test_replace_node_returns_success(server_fixture, tmp_path):
+    port, root, lookup = server_fixture
+
+    # Write the source file to the root's filepath directory
+    _write_func_file(tmp_path)
+
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Old summary"
+
+    new_code = "def add(a, b):\n    return a + b + 1\n"
+    body = json.dumps({"source": new_code}).encode()
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/abc123def456",
+        body=body,
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read())
+    assert data["success"] is True
+    conn.close()
+
+
+def test_replace_clears_summary(server_fixture, tmp_path):
+    port, root, lookup = server_fixture
+
+    _write_func_file(tmp_path)
+
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Will be cleared"
+    func_node.pseudocode = "Will be cleared"
+
+    new_code = "def add(a, b):\n    return a + b + 2\n"
+    body = json.dumps({"source": new_code}).encode()
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/abc123def456",
+        body=body,
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    resp.read()
+    conn.close()
+
+    assert func_node.summary is None
+    assert func_node.pseudocode is None
