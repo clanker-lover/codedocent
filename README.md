@@ -114,14 +114,15 @@ Each block shows a quality badge based on static analysis:
 
 ## Current status
 
-**Phase 4 of 8 complete — working MVP.**
+**Phase 5 of 8 complete — working MVP.**
 
 - ✅ Scanner, parser, renderer, analyzer, server, CLI — all built and tested
-- ✅ 50 tests passing
+- ✅ Code export with Show Code, Export Code, and Copy for AI buttons
+- ✅ 57 tests passing
 - ✅ Interactive navigation with lazy AI analysis
 - ✅ Static HTML full-analysis mode
 - ✅ Parallel workers for batch analysis
-- 🔲 Code export (Phase 5)
+- ✅ Code export — Show Code, Export Code, Copy for AI (Phase 5)
 - 🔲 Code replacement (Phase 7)
 - 🔲 pip packaging (Phase 8)
 
