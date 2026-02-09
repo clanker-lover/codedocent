@@ -221,6 +221,15 @@ def test_analyze_node_returns_summary(mock_ollama, server_fixture):
     conn.close()
 
 
+def test_node_to_dict_source_propagates_to_children():
+    """include_source=True should propagate to child nodes."""
+    child = _make_func_node(name="inner", node_id="child_id_1234")
+    parent = _make_dir_node(children=[child])
+    d = _node_to_dict(parent, include_source=True)
+    assert "source" in d["children"][0]
+    assert "def add" in d["children"][0]["source"]
+
+
 def test_analyze_already_analyzed_returns_cached(server_fixture):
     port, _, lookup = server_fixture
 
@@ -234,4 +243,22 @@ def test_analyze_already_analyzed_returns_cached(server_fixture):
     assert resp.status == 200
     data = json.loads(resp.read())
     assert data["summary"] == "Already analyzed"
+    conn.close()
+
+
+def test_analyze_response_includes_source(server_fixture):
+    """The /api/analyze/<id> response should include source code."""
+    port, _, lookup = server_fixture
+
+    # Pre-set a summary so no AI call is needed
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Test summary"
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", "/api/analyze/abc123def456")
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read())
+    assert "source" in data
+    assert "def add" in data["source"]
     conn.close()

@@ -139,7 +139,7 @@ def start_server(
 
             # Return cached result if already analyzed
             if node.summary is not None:
-                result = _node_to_dict(node)
+                result = _node_to_dict(node, include_source=True)
                 data = json.dumps(result).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -156,7 +156,7 @@ def start_server(
 
                     analyze_single_node(node, model, cache_dir)
 
-            result = _node_to_dict(node)
+            result = _node_to_dict(node, include_source=True)
             data = json.dumps(result).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

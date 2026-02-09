@@ -1,0 +1,14 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Pytest
+.pytest_cache/
+
+# codedocent generated output
+codedocent_output.html
+test_gemma4b.html
+
+# codedocent AI analysis cache
+.codedocent_cache/
+.codedocent_cache.json

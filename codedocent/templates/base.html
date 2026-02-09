@@ -181,6 +181,60 @@ body {
     padding-left: 16px;
 }
 
+.cd-code-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.cd-code-btn {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 14px;
+    border: 1px solid #D0D0D0;
+    background: #F5F5F5;
+    color: #555;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.cd-code-btn:hover {
+    background: #E8E8E8;
+}
+
+.cd-code-btn--active {
+    background: #1A1A2E;
+    color: #FFF;
+    border-color: #1A1A2E;
+}
+
+.cd-code-btn--copied {
+    background: #2E7D32;
+    color: #FFF;
+    border-color: #2E7D32;
+}
+
+.cd-source-display {
+    display: none;
+    background: #1E1E2E;
+    color: #D4D4D4;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.5;
+    margin-top: 0;
+}
+
+.cd-source-display--open {
+    display: block;
+}
+
 @media (max-width: 600px) {
     .cd-header {
         padding: 12px 12px;
@@ -247,6 +301,18 @@ body {
             {% endfor %}
         </div>
         {% endif %}
+        {% if node.node_type != 'directory' and node.source %}
+        <div class="cd-code-actions">
+            <button class="cd-code-btn" onclick="cdToggleSource(this)">Show Code</button>
+            <button class="cd-code-btn" onclick="cdExportCode(this)">Export Code</button>
+            <button class="cd-code-btn" onclick="cdCopyForAI(this)">Copy for AI</button>
+        </div>
+        <pre class="cd-source-display"
+             data-node-type="{{ node.node_type }}"
+             data-node-name="{{ node.name }}"
+             data-filepath="{{ node.filepath }}"
+             data-language="{{ node.language or '' }}">{{ node.source }}</pre>
+        {% endif %}
         {% if node.children %}
         <div class="cd-node__children">
             {% for child in node.children %}
@@ -266,6 +332,71 @@ body {
 <main class="cd-main">
     {{ render_node(root) }}
 </main>
+
+<script>
+function cdToggleSource(btn) {
+    var pre = btn.closest('.cd-node__body').querySelector('.cd-source-display');
+    var isOpen = pre.classList.contains('cd-source-display--open');
+    if (isOpen) {
+        pre.classList.remove('cd-source-display--open');
+        btn.classList.remove('cd-code-btn--active');
+        btn.textContent = 'Show Code';
+    } else {
+        pre.classList.add('cd-source-display--open');
+        btn.classList.add('cd-code-btn--active');
+        btn.textContent = 'Hide Code';
+    }
+}
+
+function cdExportCode(btn) {
+    var pre = btn.closest('.cd-node__body').querySelector('.cd-source-display');
+    cdCopyToClipboard(pre.textContent, btn);
+}
+
+function cdCopyForAI(btn) {
+    var pre = btn.closest('.cd-node__body').querySelector('.cd-source-display');
+    var nodeType = pre.dataset.nodeType;
+    var nodeName = pre.dataset.nodeName;
+    var filepath = pre.dataset.filepath;
+    var language = pre.dataset.language;
+    var text = 'This is the ' + nodeType + ' `' + nodeName + '` from `' + filepath + '`:\n\n```' + language + '\n' + pre.textContent + '\n```';
+    cdCopyToClipboard(text, btn);
+}
+
+function cdCopyToClipboard(text, btn) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            cdShowCopied(btn);
+        }, function() {
+            cdFallbackCopy(text, btn);
+        });
+    } else {
+        cdFallbackCopy(text, btn);
+    }
+}
+
+function cdFallbackCopy(text, btn) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); cdShowCopied(btn); }
+    catch(e) {}
+    document.body.removeChild(ta);
+}
+
+function cdShowCopied(btn) {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('cd-code-btn--copied');
+    setTimeout(function() {
+        btn.textContent = orig;
+        btn.classList.remove('cd-code-btn--copied');
+    }, 1500);
+}
+</script>
 
 </body>
 </html>

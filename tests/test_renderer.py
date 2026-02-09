@@ -183,3 +183,71 @@ def test_render_interactive_returns_html():
     assert "TREE_DATA" in html
     assert "analyzeNode" in html
     assert "</html>" in html
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Code export
+# ---------------------------------------------------------------------------
+
+
+def test_render_contains_code_action_buttons(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "Show Code" in html
+    assert "Export Code" in html
+    assert "Copy for AI" in html
+
+
+def test_render_no_code_buttons_for_directory(tmp_path):
+    """Directories should not have code export buttons."""
+    root = CodeNode(
+        name="mydir",
+        node_type="directory",
+        language=None,
+        filepath="/tmp/mydir",
+        start_line=0,
+        end_line=0,
+        source="",
+        line_count=0,
+    )
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "Show Code</button>" not in html
+    assert "Export Code</button>" not in html
+    assert "Copy for AI</button>" not in html
+
+
+def test_render_source_display_contains_code(tmp_path):
+    root = _make_tree()
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+    assert "cd-source-display" in html
+    assert "def greet(self):" in html
+
+
+def test_render_interactive_contains_code_action_buttons():
+    from codedocent.analyzer import assign_node_ids
+    from codedocent.renderer import render_interactive
+
+    root = _make_tree()
+    assign_node_ids(root)
+    html = render_interactive(root)
+    assert "Show Code" in html
+    assert "Export Code" in html
+    assert "Copy for AI" in html
+
+
+def test_render_interactive_excludes_source_from_json():
+    """Source code must NOT be in TREE_DATA JSON to avoid breaking HTML templates."""
+    from codedocent.analyzer import assign_node_ids
+    from codedocent.renderer import render_interactive
+
+    root = _make_tree()
+    assign_node_ids(root)
+    html = render_interactive(root)
+    # Source should not appear in the embedded JSON
+    assert '"source"' not in html

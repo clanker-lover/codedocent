@@ -254,6 +254,60 @@ body {
     padding-left: 16px;
 }
 
+.cd-code-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.cd-code-btn {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 14px;
+    border: 1px solid #D0D0D0;
+    background: #F5F5F5;
+    color: #555;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.cd-code-btn:hover {
+    background: #E8E8E8;
+}
+
+.cd-code-btn--active {
+    background: #1A1A2E;
+    color: #FFF;
+    border-color: #1A1A2E;
+}
+
+.cd-code-btn--copied {
+    background: #2E7D32;
+    color: #FFF;
+    border-color: #2E7D32;
+}
+
+.cd-source-display {
+    display: none;
+    background: #1E1E2E;
+    color: #D4D4D4;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.5;
+    margin-top: 0;
+}
+
+.cd-source-display--open {
+    display: block;
+}
+
 @media (max-width: 600px) {
     .cd-header {
         padding: 12px 12px;
@@ -306,6 +360,137 @@ function qualityEmoji(q) {
     if (q === 'warning') return '\u{1F534}';
     if (q === 'complex') return '\u{1F7E1}';
     return '\u{1F7E2}';
+}
+
+var sourceCache = {};
+
+function cdFetchSource(nodeId, callback) {
+    if (sourceCache[nodeId]) {
+        callback(sourceCache[nodeId]);
+        return;
+    }
+    fetch('/api/analyze/' + nodeId, {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.source) {
+                sourceCache[nodeId] = data.source;
+            }
+            callback(data.source || '');
+        })
+        .catch(function() { callback(''); });
+}
+
+function cdToggleSource(btn, pre) {
+    var isOpen = pre.classList.contains('cd-source-display--open');
+    if (isOpen) {
+        pre.classList.remove('cd-source-display--open');
+        btn.classList.remove('cd-code-btn--active');
+        btn.textContent = 'Show Code';
+    } else {
+        pre.classList.add('cd-source-display--open');
+        btn.classList.add('cd-code-btn--active');
+        btn.textContent = 'Hide Code';
+    }
+}
+
+function cdCopyToClipboard(text, btn) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            cdShowCopied(btn);
+        }, function() {
+            cdFallbackCopy(text, btn);
+        });
+    } else {
+        cdFallbackCopy(text, btn);
+    }
+}
+
+function cdFallbackCopy(text, btn) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); cdShowCopied(btn); }
+    catch(e) {}
+    document.body.removeChild(ta);
+}
+
+function cdShowCopied(btn) {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('cd-code-btn--copied');
+    setTimeout(function() {
+        btn.textContent = orig;
+        btn.classList.remove('cd-code-btn--copied');
+    }, 1500);
+}
+
+function cdCreateCodeActions(bodyEl, nodeId, nodeType, nodeName, filepath, language) {
+    if (bodyEl.querySelector('.cd-code-actions')) return;
+
+    var pre = document.createElement('pre');
+    pre.className = 'cd-source-display';
+
+    function ensureSource(callback) {
+        if (pre.dataset.loaded === 'true') {
+            callback(pre.textContent);
+            return;
+        }
+        cdFetchSource(nodeId, function(source) {
+            pre.textContent = source;
+            pre.dataset.loaded = 'true';
+            callback(source);
+        });
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'cd-code-actions';
+
+    var btnShow = document.createElement('button');
+    btnShow.className = 'cd-code-btn';
+    btnShow.textContent = 'Show Code';
+    btnShow.addEventListener('click', function(e) {
+        e.stopPropagation();
+        ensureSource(function() {
+            cdToggleSource(btnShow, pre);
+        });
+    });
+    actions.appendChild(btnShow);
+
+    var btnExport = document.createElement('button');
+    btnExport.className = 'cd-code-btn';
+    btnExport.textContent = 'Export Code';
+    btnExport.addEventListener('click', function(e) {
+        e.stopPropagation();
+        ensureSource(function(source) {
+            cdCopyToClipboard(source, btnExport);
+        });
+    });
+    actions.appendChild(btnExport);
+
+    var btnAI = document.createElement('button');
+    btnAI.className = 'cd-code-btn';
+    btnAI.textContent = 'Copy for AI';
+    btnAI.addEventListener('click', function(e) {
+        e.stopPropagation();
+        ensureSource(function(source) {
+            var lang = language || '';
+            var text = 'This is the ' + nodeType + ' `' + nodeName + '` from `' + (filepath || '') + '`:\n\n```' + lang + '\n' + source + '\n```';
+            cdCopyToClipboard(text, btnAI);
+        });
+    });
+    actions.appendChild(btnAI);
+
+    var childrenEl = bodyEl.querySelector('.cd-node__children');
+    if (childrenEl) {
+        bodyEl.insertBefore(actions, childrenEl);
+        bodyEl.insertBefore(pre, childrenEl);
+    } else {
+        bodyEl.appendChild(actions);
+        bodyEl.appendChild(pre);
+    }
 }
 
 function renderNode(node, depth) {
@@ -411,6 +596,11 @@ function renderNode(node, depth) {
             warn => '<div class="cd-warnings__item">\u26A0\uFE0F ' + escapeHtml(warn) + '</div>'
         ).join('');
         body.appendChild(w);
+    }
+
+    // Code export buttons (for pre-analyzed nodes with summaries at load time)
+    if (!isDir && node.node_id && node.summary) {
+        cdCreateCodeActions(body, node.node_id, node.node_type, node.name, node.filepath, node.language);
     }
 
     // Children
@@ -523,6 +713,12 @@ function analyzeNode(nodeId, linkEl, bodyEl) {
                     const nodeEl = bodyEl.closest('.cd-node');
                     const qEl = nodeEl.querySelector('.cd-node__quality');
                     if (qEl) qEl.textContent = qualityEmoji(data.quality);
+                }
+
+                // Add code export buttons
+                if (data.source) {
+                    sourceCache[nodeId] = data.source;
+                    cdCreateCodeActions(bodyEl, nodeId, data.node_type, data.name, data.filepath, data.language);
                 }
             } else {
                 loading.textContent = 'No summary available';
