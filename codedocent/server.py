@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
 import socketserver
 import threading
@@ -17,6 +18,7 @@ from codedocent.renderer import LANGUAGE_COLORS, DEFAULT_COLOR, NODE_ICONS
 
 IDLE_TIMEOUT = 300  # 5 minutes
 IDLE_CHECK_INTERVAL = 30  # seconds
+MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
@@ -80,10 +82,15 @@ def _update_node_after_replace(
     node: CodeNode, new_source: str, result: dict, cache_dir: str,
 ) -> None:
     """Update in-memory node state and invalidate cache after replacement."""
-    new_line_count = result["lines_after"]
+    from codedocent.analyzer import (  # pylint: disable=import-outside-toplevel  # noqa: E501
+        _cache_key, _load_cache, _save_cache, CACHE_FILENAME,
+    )
+
+    old_key = _cache_key(node)  # Compute BEFORE updating source
+
     node.source = new_source
-    node.line_count = new_line_count
-    node.end_line = node.start_line + new_line_count - 1
+    node.line_count = result["lines_after"]
+    node.end_line = node.start_line + node.line_count - 1
 
     # Clear cached analysis
     node.summary = None
@@ -91,14 +98,8 @@ def _update_node_after_replace(
     node.quality = None
     node.warnings = None
 
-    # Invalidate AI cache entry
-    from codedocent.analyzer import (  # pylint: disable=import-outside-toplevel  # noqa: E501
-        _cache_key, _load_cache, _save_cache, CACHE_FILENAME,
-    )
-
     cache_path = os.path.join(cache_dir, CACHE_FILENAME)
     cache = _load_cache(cache_path)
-    old_key = _cache_key(node)
     cache.get("entries", {}).pop(old_key, None)
     _save_cache(cache_path, cache)
 
@@ -153,6 +154,16 @@ def _execute_replace(node_id: str, body: dict) -> tuple[int, dict]:
     if not isinstance(new_source, str):
         return (400, {"success": False, "error": "source must be a string"})
     abs_path = _resolve_filepath(node, _Handler.cache_dir)
+    escape_err = "Path escapes project directory"
+    if os.path.islink(abs_path):
+        return (403, {"success": False, "error": escape_err})
+    real_path = os.path.realpath(abs_path)
+    real_root = os.path.realpath(_Handler.cache_dir)
+    inside = real_path == real_root or real_path.startswith(
+        real_root + os.sep,
+    )
+    if not inside:
+        return (403, {"success": False, "error": escape_err})
     from codedocent.editor import replace_block_source  # pylint: disable=import-outside-toplevel  # noqa: E501
 
     with _Handler.analyze_lock:
@@ -171,6 +182,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     # Class-level shared state, set by start_server() before serving
     html_content: str = ""
+    csrf_token: str = ""
     root: CodeNode | None = None
     node_lookup: dict[str, CodeNode] = {}
     model: str = ""
@@ -201,6 +213,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # pylint: disable=invalid-name
         """Handle POST requests."""
         self._touch()
+        token = self.headers.get("X-Codedocent-Token", "")
+        if token != _Handler.csrf_token:
+            self._send_json(403, {"error": "Invalid or missing CSRF token"})
+            return
         if self.path == "/shutdown":
             self._handle_shutdown()
         elif self.path.startswith("/api/analyze/"):
@@ -238,8 +254,32 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, result)
 
     def _handle_replace(self, node_id: str):
-        content_length = int(self.headers["Content-Length"])
-        body = json.loads(self.rfile.read(content_length))
+        cl_header = self.headers.get("Content-Length")
+        if cl_header is None:
+            self._send_json(
+                400, {"success": False,
+                      "error": "Missing Content-Length"},
+            )
+            return
+        try:
+            content_length = int(cl_header)
+        except ValueError:
+            self._send_json(
+                400, {"success": False,
+                      "error": "Invalid Content-Length"},
+            )
+            return
+        if content_length > MAX_BODY_SIZE:
+            self._send_json(
+                413, {"success": False,
+                      "error": "Request body too large"},
+            )
+            return
+        try:
+            body = json.loads(self.rfile.read(content_length))
+        except (json.JSONDecodeError, ValueError):
+            self._send_json(400, {"success": False, "error": "Invalid JSON"})
+            return
         status, result = _execute_replace(node_id, body)
         if status == 404:
             self.send_error(404, result["error"])
@@ -273,7 +313,13 @@ def _setup_handler_state(
     """Populate _Handler class-level shared state."""
     from codedocent.renderer import render_interactive  # pylint: disable=import-outside-toplevel  # noqa: E501
 
+    _Handler.csrf_token = secrets.token_urlsafe(32)
     _Handler.html_content = render_interactive(root)
+    _Handler.html_content = _Handler.html_content.replace(
+        '<meta charset="utf-8">',
+        '<meta charset="utf-8">\n'
+        '<meta name="csrf-token" content="' + _Handler.csrf_token + '">',
+    )
     _Handler.root = root
     _Handler.node_lookup = node_lookup
     _Handler.model = model

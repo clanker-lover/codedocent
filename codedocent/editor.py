@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 
 
 def _read_and_validate(
@@ -24,8 +25,11 @@ def _read_and_validate(
         or start_line > end_line
     ):
         return (None, f"Invalid line range: {start_line}-{end_line}")
-    with open(filepath, encoding="utf-8") as f:
-        lines = f.readlines()
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            lines = f.readlines()
+    except UnicodeDecodeError:
+        return (None, "File is not valid UTF-8 text")
     if end_line > len(lines):
         return (
             None,
@@ -37,8 +41,25 @@ def _read_and_validate(
 def _write_with_backup(filepath: str, lines: list[str]) -> None:
     """Create a ``.bak`` backup and write *lines* back to *filepath*."""
     shutil.copy2(filepath, filepath + ".bak")
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.writelines(lines)
+    parent_dir = os.path.dirname(os.path.abspath(filepath))
+    fd = tempfile.NamedTemporaryFile(  # pylint: disable=consider-using-with
+        mode="w", encoding="utf-8",
+        dir=parent_dir, delete=False, suffix=".tmp",
+    )
+    tmp_path = fd.name
+    try:
+        fd.writelines(lines)
+        fd.flush()
+        os.fsync(fd.fileno())
+        fd.close()
+        os.replace(tmp_path, filepath)
+    except BaseException:
+        fd.close()
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def replace_block_source(

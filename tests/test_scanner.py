@@ -93,3 +93,18 @@ def test_sorted_output():
         results = scan_directory(tmp)
         paths = [r.filepath for r in results]
         assert paths == sorted(paths)
+
+
+def test_skips_fifo():
+    """scan_directory() should skip FIFOs and not hang."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _create_tree(tmp, {
+            "good.py": b"x = 1\n",
+        })
+        fifo_path = os.path.join(tmp, "trap.py")
+        os.mkfifo(fifo_path)
+
+        results = scan_directory(tmp)
+        names = {r.filepath for r in results}
+        assert names == {"good.py"}
+        assert "trap.py" not in names

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from codedocent.editor import replace_block_source
@@ -111,3 +112,23 @@ def test_bak_contains_original(tmp_path: Path) -> None:
 
     bak = Path(str(p) + ".bak")
     assert bak.read_text(encoding="utf-8") == original
+
+
+def test_non_utf8_file_returns_error(tmp_path: Path) -> None:
+    """Writing a Latin-1 encoded file should return a UTF-8 error."""
+    p = tmp_path / "latin1.py"
+    p.write_bytes(b"x = '\xe9'\n")  # Latin-1 byte, not valid UTF-8
+
+    result = replace_block_source(str(p), 1, 1, "x = 'e'\n")
+    assert result["success"] is False
+    assert "UTF-8" in result["error"]
+
+
+def test_atomic_write_leaves_no_temp_on_success(tmp_path: Path) -> None:
+    """After a successful replace, no .tmp files should remain."""
+    p = _write_sample(tmp_path)
+    result = replace_block_source(str(p), 2, 3, "new_line\n")
+    assert result["success"] is True
+
+    tmp_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
+    assert tmp_files == []

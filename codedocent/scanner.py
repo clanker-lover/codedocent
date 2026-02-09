@@ -65,6 +65,8 @@ class ScannedFile:
 
 def _is_binary(filepath: str, sample_size: int = 8192) -> bool:
     """Check if a file is binary by looking for null bytes."""
+    if not os.path.isfile(filepath):
+        return True
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(sample_size)
@@ -111,6 +113,8 @@ def scan_directory(path: str | Path) -> list[ScannedFile]:
 
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
+            if not os.path.isfile(filepath):
+                continue
             rel_path = os.path.relpath(filepath, root)
 
             # Skip gitignore'd files

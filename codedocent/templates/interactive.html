@@ -529,6 +529,7 @@ function cdToggleTheme() {
 })();
 
 const TREE_DATA = {{ tree_json | safe }};
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
 // Track expanded path for breadcrumbs
 let breadcrumbPath = [TREE_DATA];
@@ -715,7 +716,7 @@ function cdShowReplacePanel(bodyEl, nodeId, currentSource, pre, btnShow) {
         btnConfirm.textContent = 'Replacing...';
         fetch('/api/replace/' + nodeId, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-Codedocent-Token': CSRF_TOKEN},
             body: JSON.stringify({source: ta.value})
         })
         .then(function(r) { return r.json(); })
@@ -965,7 +966,10 @@ function analyzeNode(nodeId, linkEl, bodyEl) {
     loading.textContent = 'Analyzing...';
     linkEl.replaceWith(loading);
 
-    fetch('/api/analyze/' + nodeId, {method: 'POST'})
+    fetch('/api/analyze/' + nodeId, {
+        method: 'POST',
+        headers: {'X-Codedocent-Token': CSRF_TOKEN}
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             // Replace loading with summary
@@ -1038,7 +1042,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Shutdown on tab close
 window.addEventListener('beforeunload', function() {
-    navigator.sendBeacon('/shutdown');
+    fetch('/shutdown', {
+        method: 'POST',
+        headers: {'X-Codedocent-Token': CSRF_TOKEN},
+        keepalive: true
+    });
 });
 </script>
 

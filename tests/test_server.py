@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from http.client import HTTPConnection
@@ -11,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from codedocent.parser import CodeNode
-from codedocent.server import _node_to_dict
+from codedocent.server import _Handler, _node_to_dict, MAX_BODY_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,19 @@ def _make_tree() -> tuple[CodeNode, dict[str, CodeNode]]:
         "abc123def456": func,
     }
     return root, lookup
+
+
+def _post_headers() -> dict[str, str]:
+    """Return headers dict with the current CSRF token."""
+    return {"X-Codedocent-Token": _Handler.csrf_token}
+
+
+def _post_json_headers() -> dict[str, str]:
+    """Return headers dict with CSRF token and JSON content type."""
+    return {
+        "Content-Type": "application/json",
+        "X-Codedocent-Token": _Handler.csrf_token,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +170,7 @@ def server_fixture(tmp_path):
     # Shutdown
     try:
         conn = HTTPConnection("127.0.0.1", port, timeout=2)
-        conn.request("POST", "/shutdown")
+        conn.request("POST", "/shutdown", headers=_post_headers())
         conn.getresponse()
         conn.close()
     except Exception:
@@ -192,7 +206,10 @@ def test_get_tree_returns_json(server_fixture):
 def test_analyze_unknown_node_returns_404(server_fixture):
     port, _, _ = server_fixture
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("POST", "/api/analyze/nonexistent999")
+    conn.request(
+        "POST", "/api/analyze/nonexistent999",
+        headers=_post_headers(),
+    )
     resp = conn.getresponse()
     assert resp.status == 404
     conn.close()
@@ -213,7 +230,10 @@ def test_analyze_node_returns_summary(mock_ollama, server_fixture):
     func_node.summary = None
 
     conn = HTTPConnection("127.0.0.1", port, timeout=10)
-    conn.request("POST", "/api/analyze/abc123def456")
+    conn.request(
+        "POST", "/api/analyze/abc123def456",
+        headers=_post_headers(),
+    )
     resp = conn.getresponse()
     assert resp.status == 200
     data = json.loads(resp.read())
@@ -238,7 +258,10 @@ def test_analyze_already_analyzed_returns_cached(server_fixture):
     func_node.summary = "Already analyzed"
 
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("POST", "/api/analyze/abc123def456")
+    conn.request(
+        "POST", "/api/analyze/abc123def456",
+        headers=_post_headers(),
+    )
     resp = conn.getresponse()
     assert resp.status == 200
     data = json.loads(resp.read())
@@ -255,7 +278,10 @@ def test_analyze_response_includes_source(server_fixture):
     func_node.summary = "Test summary"
 
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("POST", "/api/analyze/abc123def456")
+    conn.request(
+        "POST", "/api/analyze/abc123def456",
+        headers=_post_headers(),
+    )
     resp = conn.getresponse()
     assert resp.status == 200
     data = json.loads(resp.read())
@@ -283,7 +309,7 @@ def test_replace_unknown_node_returns_404(server_fixture):
     conn.request(
         "POST", "/api/replace/nonexistent999",
         body=body,
-        headers={"Content-Type": "application/json"},
+        headers=_post_json_headers(),
     )
     resp = conn.getresponse()
     assert resp.status == 404
@@ -305,7 +331,7 @@ def test_replace_node_returns_success(server_fixture, tmp_path):
     conn.request(
         "POST", "/api/replace/abc123def456",
         body=body,
-        headers={"Content-Type": "application/json"},
+        headers=_post_json_headers(),
     )
     resp = conn.getresponse()
     assert resp.status == 200
@@ -329,7 +355,7 @@ def test_replace_clears_summary(server_fixture, tmp_path):
     conn.request(
         "POST", "/api/replace/abc123def456",
         body=body,
-        headers={"Content-Type": "application/json"},
+        headers=_post_json_headers(),
     )
     resp = conn.getresponse()
     assert resp.status == 200
@@ -373,3 +399,221 @@ def test_get_source_unknown_node_returns_404(server_fixture):
     resp = conn.getresponse()
     assert resp.status == 404
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CSRF token tests
+# ---------------------------------------------------------------------------
+
+
+def test_post_without_csrf_token_returns_403(server_fixture):
+    port, _, lookup = server_fixture
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Already analyzed"
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", "/api/analyze/abc123def456")
+    resp = conn.getresponse()
+    assert resp.status == 403
+    data = json.loads(resp.read())
+    assert "CSRF" in data["error"]
+    conn.close()
+
+
+def test_post_with_wrong_csrf_token_returns_403(server_fixture):
+    port, _, lookup = server_fixture
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Already analyzed"
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/analyze/abc123def456",
+        headers={"X-Codedocent-Token": "wrong-token-value"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 403
+    data = json.loads(resp.read())
+    assert "CSRF" in data["error"]
+    conn.close()
+
+
+def test_post_with_correct_csrf_token_succeeds(server_fixture):
+    port, _, lookup = server_fixture
+    func_node = lookup["abc123def456"]
+    func_node.summary = "Already analyzed"
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/analyze/abc123def456",
+        headers=_post_headers(),
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Symlink escape test
+# ---------------------------------------------------------------------------
+
+
+def test_symlink_replace_rejected(server_fixture, tmp_path):
+    port, root, lookup = server_fixture
+
+    # Create a target file outside tmp_path
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "secret.py"
+    target.write_text("secret = True\n", encoding="utf-8")
+
+    # Create a symlink inside the project root pointing outside
+    link = tmp_path / "evil.py"
+    link.symlink_to(target)
+
+    # Create a node that references the symlink
+    evil_node = CodeNode(
+        name="evil",
+        node_type="function",
+        language="python",
+        filepath="evil.py",
+        start_line=1,
+        end_line=1,
+        source="secret = True\n",
+        line_count=1,
+        node_id="evil_node_1234",
+    )
+    _Handler.node_lookup["evil_node_1234"] = evil_node
+
+    body = json.dumps({"source": "hacked = True\n"}).encode()
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/evil_node_1234",
+        body=body,
+        headers=_post_json_headers(),
+    )
+    resp = conn.getresponse()
+    assert resp.status == 403
+    data = json.loads(resp.read())
+    assert "escapes" in data["error"]
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Robust request parsing tests
+# ---------------------------------------------------------------------------
+
+
+def test_replace_missing_content_length_returns_400(server_fixture):
+    """POST to /api/replace without Content-Length returns 400."""
+    port, _, _ = server_fixture
+
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/abc123def456",
+        headers={
+            "X-Codedocent-Token": _Handler.csrf_token,
+            "Transfer-Encoding": "chunked",
+        },
+    )
+    resp = conn.getresponse()
+    # The server should return 400 for missing Content-Length
+    assert resp.status == 400
+    data = json.loads(resp.read())
+    assert "Content-Length" in data["error"]
+    conn.close()
+
+
+def test_replace_invalid_content_length_returns_400(server_fixture):
+    """POST with non-numeric Content-Length returns 400."""
+    port, _, _ = server_fixture
+
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.putrequest("POST", "/api/replace/abc123def456")
+    conn.putheader("X-Codedocent-Token", _Handler.csrf_token)
+    conn.putheader("Content-Length", "abc")
+    conn.endheaders()
+    conn.send(b"test")
+
+    resp = conn.getresponse()
+    assert resp.status == 400
+    data = json.loads(resp.read())
+    assert "Content-Length" in data["error"]
+    conn.close()
+
+
+def test_replace_oversized_body_returns_413(server_fixture):
+    """POST with Content-Length exceeding MAX_BODY_SIZE returns 413."""
+    port, _, _ = server_fixture
+
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.putrequest("POST", "/api/replace/abc123def456")
+    conn.putheader("X-Codedocent-Token", _Handler.csrf_token)
+    conn.putheader("Content-Type", "application/json")
+    conn.putheader("Content-Length", str(MAX_BODY_SIZE + 1))
+    conn.endheaders()
+    # Don't actually send a huge body, just the header is enough
+    conn.send(b"{}")
+
+    resp = conn.getresponse()
+    assert resp.status == 413
+    data = json.loads(resp.read())
+    assert "too large" in data["error"]
+    conn.close()
+
+
+def test_replace_invalid_json_returns_400(server_fixture):
+    """POST with non-JSON body returns 400."""
+    port, _, _ = server_fixture
+
+    bad_body = b"this is not json"
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST", "/api/replace/abc123def456",
+        body=bad_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Codedocent-Token": _Handler.csrf_token,
+            "Content-Length": str(len(bad_body)),
+        },
+    )
+    resp = conn.getresponse()
+    assert resp.status == 400
+    data = json.loads(resp.read())
+    assert "Invalid JSON" in data["error"]
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Cache key order test
+# ---------------------------------------------------------------------------
+
+
+def test_old_cache_entry_removed_after_replace(tmp_path):
+    """_update_node_after_replace() should remove the OLD cache entry."""
+    from codedocent.analyzer import (
+        _cache_key, _load_cache, _save_cache, CACHE_FILENAME,
+    )
+    from codedocent.server import _update_node_after_replace
+
+    node = _make_func_node(
+        source="def add(a, b):\n    return a + b\n",
+    )
+
+    # Compute the old cache key before any replacement
+    old_key = _cache_key(node)
+
+    # Pre-populate the cache with the old key
+    cache_path = os.path.join(str(tmp_path), CACHE_FILENAME)
+    cache = {"entries": {old_key: {"summary": "old"}}}
+    _save_cache(cache_path, cache)
+
+    # Simulate replacement result
+    result = {"lines_after": 3}
+    new_source = "def add(a, b):\n    c = a + b\n    return c\n"
+    _update_node_after_replace(node, new_source, result, str(tmp_path))
+
+    # Verify the old entry is gone
+    updated_cache = _load_cache(cache_path)
+    assert old_key not in updated_cache.get("entries", {})
