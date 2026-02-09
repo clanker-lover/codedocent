@@ -22,7 +22,7 @@ Blocks are **nested** — directories contain files, files contain classes, clas
 
 ### Code actions
 
-Every analyzed block gets a toolbar with one-click actions:
+Every block gets a toolbar with one-click actions (no AI analysis needed):
 
 | Button | What it does |
 |--------|-------------|
@@ -56,6 +56,12 @@ pip install -e .
 
 ### Run
 
+**Setup wizard** — just run `codedocent` with no arguments:
+```bash
+codedocent
+```
+The wizard walks you through picking a folder, detecting Ollama, choosing a model, and selecting a mode. No flags to memorize.
+
 **Interactive mode** (recommended) — instant load, AI analyzes each block on click:
 ```bash
 codedocent /path/to/any/codebase
@@ -73,10 +79,20 @@ codedocent /path/to/any/codebase --full
 codedocent /path/to/any/codebase --text
 ```
 
+**GUI launcher** — a graphical window with folder picker, model dropdown, and mode selector:
+```bash
+codedocent --gui
+# or use the standalone entry point:
+codedocent-gui
+```
+Requires tkinter (usually included with Python; on Ubuntu: `sudo apt install python3-tk`).
+
 ### Options
 
 | Flag | Description |
 |------|-------------|
+| *(no args)* | Launch interactive setup wizard |
+| `--gui` | Open GUI launcher (tkinter) |
 | `--full` | Analyze everything upfront, output static HTML |
 | `--text` | Print text tree to terminal (no browser) |
 | `--no-ai` | Skip AI summaries, show structure only |
@@ -131,13 +147,15 @@ Warnings roll up through the tree: a file inherits the worst quality of its func
 
 ```
 codedocent/
-├── cli.py          Command-line interface and entry point
-├── scanner.py      File discovery with .gitignore support
-├── parser.py       AST parsing via tree-sitter
-├── analyzer.py     AI summaries, quality scoring, caching
-├── editor.py       Code replacement with backup safety
-├── renderer.py     HTML generation (static + interactive)
-├── server.py       Local server for interactive mode
+├── cli.py            Command-line interface, setup wizard, entry point
+├── gui.py            Tkinter GUI launcher
+├── ollama_utils.py   Shared Ollama detection and model listing
+├── scanner.py        File discovery with .gitignore support
+├── parser.py         AST parsing via tree-sitter
+├── analyzer.py       AI summaries, quality scoring, caching
+├── editor.py         Code replacement with backup safety
+├── renderer.py       HTML generation (static + interactive)
+├── server.py         Local server for interactive mode
 └── templates/
     └── interactive.html   Single-page app UI
 ```
@@ -145,13 +163,15 @@ codedocent/
 ## Current status
 
 - Scanner, parser, renderer, analyzer, editor, server, CLI — all built and tested
+- Interactive setup wizard when run with no arguments
+- GUI launcher via `--gui` flag or `codedocent-gui` entry point
 - Interactive navigation with lazy AI analysis
+- Code action buttons (Show Code, Export, Copy for AI, Replace) available immediately — no AI analysis required
 - Static HTML full-analysis mode with parallel workers
-- Code actions — Show Code, Export Code, Copy for AI, Replace Code
 - Code replacement with `.bak` backup and cache invalidation
 - Quality scoring with two-tier thresholds and warning rollup across the tree
-- pip-installable package with `codedocent` CLI entry point
-- 75 tests passing
+- pip-installable package with `codedocent` and `codedocent-gui` CLI entry points
+- 93 tests passing
 - Code quality: pylint 10/10, bandit/flake8/mypy all clean
 
 ## License
