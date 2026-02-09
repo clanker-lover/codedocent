@@ -12,7 +12,7 @@ EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
     ".js": "javascript",
     ".ts": "typescript",
-    ".jsx": "tsx",
+    ".jsx": "javascript",
     ".tsx": "tsx",
     ".c": "c",
     ".cpp": "cpp",

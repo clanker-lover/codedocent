@@ -95,6 +95,13 @@ def test_sorted_output():
         assert paths == sorted(paths)
 
 
+def test_jsx_maps_to_javascript():
+    with tempfile.TemporaryDirectory() as tmp:
+        _create_tree(tmp, {"app.jsx": b"const x = <div/>;\n"})
+        results = scan_directory(tmp)
+        assert results[0].language == "javascript"
+
+
 def test_skips_fifo():
     """scan_directory() should skip FIFOs and not hang."""
     with tempfile.TemporaryDirectory() as tmp:

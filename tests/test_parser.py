@@ -122,6 +122,24 @@ def test_parse_unknown_language():
     assert node.line_count == 1
 
 
+SAMPLE_JS_EXPORTS = '''\
+export function myFunc() { return 1; }
+export class MyClass { constructor() {} }
+export default function defaultFunc() { return 2; }
+const internal = () => 3;
+'''
+
+
+def test_parse_js_exports():
+    node = parse_file("mod.js", "javascript", source=SAMPLE_JS_EXPORTS)
+    names = [c.name for c in node.children]
+    assert "myFunc" in names
+    assert "MyClass" in names
+    assert "defaultFunc" in names
+    assert "internal" in names
+    assert len(node.children) == 4
+
+
 def test_source_preserved():
     node = parse_file("test.py", "python", source=SAMPLE_PYTHON)
     assert node.source == SAMPLE_PYTHON

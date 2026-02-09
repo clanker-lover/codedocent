@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 from codedocent.parser import CodeNode, parse_directory
@@ -13,6 +14,15 @@ from codedocent.scanner import scan_directory
 # Re-export for backwards compatibility and testability
 _check_ollama = check_ollama
 _fetch_ollama_models = fetch_ollama_models
+
+
+def _safe_input(prompt: str) -> str:
+    """Wrap input() to handle EOF gracefully."""
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\nInput closed. Exiting.")
+        sys.exit(0)
 
 
 def print_tree(node: CodeNode, indent: int = 0) -> None:
@@ -44,7 +54,7 @@ def print_tree(node: CodeNode, indent: int = 0) -> None:
 def _ask_folder() -> str:
     """Prompt for a valid folder path, re-asking on invalid input."""
     while True:
-        path = input("What folder do you want to analyze? ").strip()
+        path = _safe_input("What folder do you want to analyze? ").strip()
         path = os.path.expanduser(path)
         if os.path.isdir(path):
             file_count = len(list(scan_directory(path)))
@@ -55,7 +65,7 @@ def _ask_folder() -> str:
 
 def _ask_no_ai_fallback() -> bool:
     """Ask user whether to continue without AI. Returns True for no-ai."""
-    fallback = input("Continue without AI? [Y/n]: ").strip().lower()
+    fallback = _safe_input("Continue without AI? [Y/n]: ").strip().lower()
     if fallback in ("", "y", "yes"):
         return True
     raise SystemExit(0)
@@ -66,7 +76,7 @@ def _pick_model(models: list[str]) -> str:
     print("Available models:")
     for i, m in enumerate(models, 1):
         print(f"  {i}. {m}")
-    choice = input("Which model? [1]: ").strip()
+    choice = _safe_input("Which model? [1]: ").strip()
     if choice == "":
         return models[0]
     try:
@@ -106,7 +116,7 @@ def _run_wizard() -> argparse.Namespace:
     print("  1. Interactive \u2014 browse in browser [default]")
     print("  2. Full export \u2014 analyze everything, save HTML")
     print("  3. Text tree \u2014 plain text in terminal")
-    mode_choice = input("Choice [1]: ").strip()
+    mode_choice = _safe_input("Choice [1]: ").strip()
 
     text = mode_choice == "3"
     full = mode_choice == "2"

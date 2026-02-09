@@ -66,6 +66,19 @@ _METHOD_TYPES: dict[str, dict[str, str]] = {
 }
 
 
+def _unwrap_exports(root_node) -> list:
+    """Yield top-level children, unwrapping export_statement nodes."""
+    result = []
+    for child in root_node.children:
+        if child.type == "export_statement":
+            for inner in child.children:
+                if inner.type not in ("export", "default", ",", ";"):
+                    result.append(inner)
+        else:
+            result.append(child)
+    return result
+
+
 def _rules_for(language: str) -> dict[str, tuple[str, str]]:
     """Return AST extraction rules for the given language."""
     if language == "python":
@@ -126,7 +139,7 @@ def _extract_arrow_functions(root_node, language: str) -> list[CodeNode]:
     if language not in ("javascript", "typescript", "tsx"):
         return []
     results: list[CodeNode] = []
-    for child in root_node.children:
+    for child in _unwrap_exports(root_node):
         if child.type != "lexical_declaration":
             continue
         for decl in child.children:
@@ -210,7 +223,12 @@ def _extract_top_level_nodes(
 ) -> list[CodeNode]:
     """Walk AST top-level children, create CodeNodes, attach methods."""
     children: list[CodeNode] = []
-    for child in root_node.children:
+    top_children = (
+        _unwrap_exports(root_node)
+        if language in ("javascript", "typescript", "tsx")
+        else root_node.children
+    )
+    for child in top_children:
         if child.type in rules:
             our_type, name_child = rules[child.type]
             node = CodeNode(
