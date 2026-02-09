@@ -1,5 +1,10 @@
 # codedocent
 
+
+<img width="1658" height="2158" alt="Screenshot_2026-02-09_13-17-06" src="https://github.com/user-attachments/assets/ff097ead-69ec-4618-b7b7-2b99c60ac57e" />
+
+
+
 **Code visualization for non-programmers.**
 
 A docent is a guide who explains things to people who aren't experts. Codedocent does that for code.
