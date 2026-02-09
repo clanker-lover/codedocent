@@ -4,7 +4,101 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>codedocent — interactive</title>
+<script>
+if (localStorage.getItem('cd-theme') === 'light')
+    document.documentElement.classList.add('light-mode');
+</script>
 <style>
+:root {
+    --bg-body: #1a1a2e;
+    --bg-header: #12122a;
+    --bg-node: #222240;
+    --bg-imports: #1e1e38;
+    --bg-pseudocode: #1e2a38;
+    --bg-source: #0d0d1a;
+    --bg-badge: #2e2e50;
+    --bg-btn: #2e2e50;
+    --bg-btn-hover: #3a3a5a;
+    --bg-btn-active: #4466aa;
+    --bg-breadcrumb: #1e1e38;
+    --bg-header-hover: #2a2a48;
+
+    --text-primary: #e0e0e0;
+    --text-body: #e0e0e0;
+    --text-name: #e0e0f0;
+    --text-badge: #aaaacc;
+    --text-lines: #8888aa;
+    --text-range: #8888aa;
+    --text-warning: #FFD700;
+    --text-imports-label: #8888aa;
+    --text-imports-item: #bbbbcc;
+    --text-summary: #bbbbcc;
+    --text-placeholder: #666688;
+    --text-pseudocode-label: #8888aa;
+    --text-pseudocode: #ccccdd;
+    --text-btn: #bbbbcc;
+    --text-link: #7799ee;
+    --text-toggle: #8888aa;
+    --text-analyzing: #8888aa;
+    --text-breadcrumb-sep: #666688;
+    --text-breadcrumb-current: #e0e0e0;
+    --text-source: #D4D4D4;
+
+    --border-node: #3a3a5a;
+    --border-imports: #3a3a5a;
+    --border-pseudocode: #3a4a5a;
+    --border-btn: #4a4a6a;
+    --border-breadcrumb: #3a3a5a;
+    --border-textarea: #555;
+
+    --shadow-node: rgba(0, 0, 0, 0.3);
+}
+
+:root.light-mode {
+    --bg-body: #F5F5F5;
+    --bg-header: #1A1A2E;
+    --bg-node: #FFFFFF;
+    --bg-imports: #F9F9F9;
+    --bg-pseudocode: #F0F4F8;
+    --bg-source: #1E1E2E;
+    --bg-badge: #EEEEEE;
+    --bg-btn: #F5F5F5;
+    --bg-btn-hover: #E8E8E8;
+    --bg-btn-active: #1A1A2E;
+    --bg-breadcrumb: #EDEDF0;
+    --bg-header-hover: #FAFAFA;
+
+    --text-primary: #333;
+    --text-body: #333;
+    --text-name: #1A1A2E;
+    --text-badge: #666666;
+    --text-lines: #888888;
+    --text-range: #AAAAAA;
+    --text-warning: #B8860B;
+    --text-imports-label: #999999;
+    --text-imports-item: #555555;
+    --text-summary: #555555;
+    --text-placeholder: #AAAAAA;
+    --text-pseudocode-label: #999999;
+    --text-pseudocode: #444444;
+    --text-btn: #555;
+    --text-link: #5566DD;
+    --text-toggle: #888;
+    --text-analyzing: #888;
+    --text-breadcrumb-sep: #999;
+    --text-breadcrumb-current: #333;
+    --text-source: #D4D4D4;
+
+    --border-node: #E0E0E0;
+    --border-imports: #E8E8E8;
+    --border-pseudocode: #D0D8E0;
+    --border-btn: #D0D0D0;
+    --border-breadcrumb: #D8D8DC;
+    --border-textarea: #555;
+
+    --shadow-node: rgba(0, 0, 0, 0.06);
+}
+
 *, *::before, *::after {
     box-sizing: border-box;
 }
@@ -13,16 +107,19 @@ body {
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #F5F5F5;
-    color: #333;
+    background: var(--bg-body);
+    color: var(--text-body);
     line-height: 1.5;
 }
 
 .cd-header {
-    background: #1A1A2E;
+    background: var(--bg-header);
     color: #FFFFFF;
     padding: 16px 24px;
     margin-bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .cd-header__title {
@@ -39,9 +136,24 @@ body {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
 }
 
+.cd-theme-toggle {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #FFF;
+    line-height: 1;
+}
+
+.cd-theme-toggle:hover {
+    border-color: rgba(255,255,255,0.6);
+}
+
 .cd-breadcrumb {
-    background: #EDEDF0;
-    border-bottom: 1px solid #D8D8DC;
+    background: var(--bg-breadcrumb);
+    border-bottom: 1px solid var(--border-breadcrumb);
     padding: 8px 24px;
     font-size: 13px;
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
@@ -53,7 +165,7 @@ body {
 }
 
 .cd-breadcrumb__item {
-    color: #5566DD;
+    color: var(--text-link);
     cursor: pointer;
     text-decoration: none;
 }
@@ -63,12 +175,12 @@ body {
 }
 
 .cd-breadcrumb__sep {
-    color: #999;
+    color: var(--text-breadcrumb-sep);
     margin: 0 2px;
 }
 
 .cd-breadcrumb__current {
-    color: #333;
+    color: var(--text-breadcrumb-current);
     font-weight: 600;
 }
 
@@ -79,13 +191,14 @@ body {
 }
 
 .cd-node {
-    background: #FFFFFF;
-    border: 1px solid #E0E0E0;
+    background: var(--bg-node);
+    border: 1px solid var(--border-node);
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 3px var(--shadow-node);
     margin-bottom: 12px;
     border-left-width: 5px;
     border-left-style: solid;
+    border-left-color: var(--node-color, #CCCCCC);
 }
 
 .cd-node__header {
@@ -99,13 +212,13 @@ body {
 }
 
 .cd-node__header:hover {
-    background: #FAFAFA;
+    background: var(--bg-header-hover);
 }
 
 .cd-node__toggle {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 12px;
-    color: #888;
+    color: var(--text-toggle);
     width: 16px;
     text-align: center;
     flex-shrink: 0;
@@ -120,7 +233,7 @@ body {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-weight: 700;
     font-size: 14px;
-    color: #1A1A2E;
+    color: var(--text-name);
 }
 
 .cd-node__badge {
@@ -131,18 +244,18 @@ body {
     letter-spacing: 0.05em;
     padding: 2px 8px;
     border-radius: 10px;
-    background: #EEEEEE;
-    color: #666666;
+    background: var(--bg-badge);
+    color: var(--text-badge);
 }
 
 .cd-node__lines {
     font-size: 12px;
-    color: #888888;
+    color: var(--text-lines);
 }
 
 .cd-node__range {
     font-size: 12px;
-    color: #AAAAAA;
+    color: var(--text-range);
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
 }
 
@@ -153,7 +266,7 @@ body {
 
 .cd-node__warning-text {
     font-size: 11px;
-    color: #B8860B;
+    color: var(--text-warning);
     font-style: italic;
 }
 
@@ -167,8 +280,8 @@ body {
 }
 
 .cd-imports {
-    background: #F9F9F9;
-    border: 1px solid #E8E8E8;
+    background: var(--bg-imports);
+    border: 1px solid var(--border-imports);
     border-radius: 6px;
     padding: 8px 12px;
     margin-bottom: 8px;
@@ -179,25 +292,25 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #999999;
+    color: var(--text-imports-label);
     margin-bottom: 4px;
 }
 
 .cd-imports__item {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 13px;
-    color: #555555;
+    color: var(--text-imports-item);
     padding: 1px 0;
 }
 
 .cd-summary {
-    color: #555555;
+    color: var(--text-summary);
     font-size: 13px;
     margin-bottom: 8px;
 }
 
 .cd-analyze-link {
-    color: #5566DD;
+    color: var(--text-link);
     cursor: pointer;
     font-size: 13px;
     font-style: italic;
@@ -209,7 +322,7 @@ body {
 }
 
 .cd-analyzing {
-    color: #888;
+    color: var(--text-analyzing);
     font-size: 13px;
     font-style: italic;
     margin-bottom: 8px;
@@ -222,8 +335,8 @@ body {
 }
 
 .cd-pseudocode {
-    background: #F0F4F8;
-    border: 1px solid #D0D8E0;
+    background: var(--bg-pseudocode);
+    border: 1px solid var(--border-pseudocode);
     border-radius: 6px;
     padding: 8px 12px;
     margin-bottom: 8px;
@@ -234,14 +347,14 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #999999;
+    color: var(--text-pseudocode-label);
     margin-bottom: 4px;
 }
 
 .cd-pseudocode__code {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 13px;
-    color: #444444;
+    color: var(--text-pseudocode);
     margin: 0;
     white-space: pre-wrap;
 }
@@ -252,7 +365,7 @@ body {
 
 .cd-warnings__item {
     font-size: 13px;
-    color: #B8860B;
+    color: var(--text-warning);
     padding: 2px 0;
 }
 
@@ -272,21 +385,21 @@ body {
     font-weight: 600;
     padding: 4px 12px;
     border-radius: 14px;
-    border: 1px solid #D0D0D0;
-    background: #F5F5F5;
-    color: #555;
+    border: 1px solid var(--border-btn);
+    background: var(--bg-btn);
+    color: var(--text-btn);
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
 }
 
 .cd-code-btn:hover {
-    background: #E8E8E8;
+    background: var(--bg-btn-hover);
 }
 
 .cd-code-btn--active {
-    background: #1A1A2E;
+    background: var(--bg-btn-active);
     color: #FFF;
-    border-color: #1A1A2E;
+    border-color: var(--bg-btn-active);
 }
 
 .cd-code-btn--copied {
@@ -297,8 +410,8 @@ body {
 
 .cd-source-display {
     display: none;
-    background: #1E1E2E;
-    color: #D4D4D4;
+    background: var(--bg-source);
+    color: var(--text-source);
     border-radius: 6px;
     padding: 12px;
     margin-bottom: 8px;
@@ -343,9 +456,9 @@ body {
     min-height: 120px;
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 13px;
-    background: #1E1E2E;
-    color: #D4D4D4;
-    border: 1px solid #555;
+    background: var(--bg-source);
+    color: var(--text-source);
+    border: 1px solid var(--border-textarea);
     border-radius: 6px;
     padding: 12px;
     line-height: 1.5;
@@ -376,8 +489,12 @@ body {
 <body>
 
 <header class="cd-header">
-    <h1 class="cd-header__title">codedocent</h1>
-    <p class="cd-header__path" id="cd-root-path"></p>
+    <div class="cd-header__text">
+        <h1 class="cd-header__title">codedocent</h1>
+        <p class="cd-header__path" id="cd-root-path"></p>
+    </div>
+    <button class="cd-theme-toggle" id="cd-theme-toggle"
+            onclick="cdToggleTheme()" aria-label="Toggle theme"></button>
 </header>
 
 <nav class="cd-breadcrumb" id="cd-breadcrumb">
@@ -387,6 +504,16 @@ body {
 <main class="cd-main" id="cd-main"></main>
 
 <script>
+function cdToggleTheme() {
+    var isLight = document.documentElement.classList.toggle('light-mode');
+    localStorage.setItem('cd-theme', isLight ? 'light' : 'dark');
+    document.getElementById('cd-theme-toggle').textContent = isLight ? '\u{1F319}' : '\u2600\uFE0F';
+}
+(function() {
+    var btn = document.getElementById('cd-theme-toggle');
+    if (btn) btn.textContent = document.documentElement.classList.contains('light-mode') ? '\u{1F319}' : '\u2600\uFE0F';
+})();
+
 const TREE_DATA = {{ tree_json | safe }};
 
 // Track expanded path for breadcrumbs
@@ -634,7 +761,7 @@ function cdShowReplacePanel(bodyEl, nodeId, currentSource, pre, btnShow) {
 function renderNode(node, depth) {
     const el = document.createElement('div');
     el.className = 'cd-node';
-    el.style.borderLeftColor = node.color || '#CCCCCC';
+    el.style.setProperty('--node-color', node.color || '#CCCCCC');
     el.dataset.nodeId = node.node_id || '';
 
     const isRoot = depth === 0;
