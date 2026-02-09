@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from codedocent.parser import CodeNode
 
 # Quality scoring thresholds: (yellow_threshold, red_threshold)
@@ -99,8 +101,27 @@ def _score_radon(node: CodeNode) -> tuple[str, str | None]:
     return "clean", None
 
 
+def _is_exempt_file(node: CodeNode) -> bool:
+    """Check if a file node should skip line-count scoring.
+
+    HTML templates and test files are naturally long, so line count
+    does not indicate poor quality for these file types.
+    """
+    if node.node_type != "file":
+        return False
+    if node.language == "html":
+        return True
+    if node.language is None and node.name.endswith(".html"):
+        return True
+    if os.path.basename(node.name).startswith("test_"):
+        return True
+    return False
+
+
 def _score_line_count(node: CodeNode) -> tuple[str, str | None]:
     """Score based on line-count thresholds (two-tier: yellow/red)."""
+    if _is_exempt_file(node):
+        return "clean", None
     thresholds = LINE_THRESHOLDS.get(node.node_type)
     if thresholds and node.line_count:
         yellow, red = thresholds

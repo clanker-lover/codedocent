@@ -541,3 +541,39 @@ def test_quality_directory_returns_none():
     quality, warnings = _score_quality(node)
     assert quality is None
     assert warnings is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: Exempt HTML templates and test files from line-count scoring
+# ---------------------------------------------------------------------------
+
+
+def test_quality_html_file_exempt_from_line_count():
+    from codedocent.quality import _score_quality
+
+    node = _make_file_node(name="base.html", lang="html", source="<div></div>\n")
+    node.line_count = 1500
+    quality, warnings = _score_quality(node)
+    assert quality == "clean"
+    assert warnings is None
+
+
+def test_quality_test_file_exempt_from_line_count():
+    from codedocent.quality import _score_quality
+
+    node = _make_file_node(name="test_foo.py", lang="python", source="x = 1\n")
+    node.line_count = 600
+    quality, warnings = _score_quality(node)
+    assert quality == "clean"
+    assert warnings is None
+
+
+def test_quality_regular_python_file_still_scored():
+    from codedocent.quality import _score_quality
+
+    node = _make_file_node(name="app.py", lang="python", source="x = 1\n")
+    node.line_count = 600
+    quality, warnings = _score_quality(node)
+    assert quality == "complex"
+    assert warnings is not None
+    assert any("600 lines" in w for w in warnings)
