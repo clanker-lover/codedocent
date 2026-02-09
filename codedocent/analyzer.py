@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -103,14 +104,27 @@ def _parse_ai_response(text: str) -> tuple[str, str]:
     return summary, pseudocode
 
 
+_AI_TIMEOUT = 120
+
+
 def _summarize_with_ai(
     node: CodeNode, model: str
-) -> tuple[str, str]:
-    """Call ollama to get summary and pseudocode for a node."""
+) -> tuple[str, str] | None:
+    """Call ollama to get summary and pseudocode for a node.
+
+    Returns ``None`` if the AI call times out.
+    """
     prompt = _build_prompt(node, model)
-    response = ollama.chat(
-        model=model, messages=[{"role": "user", "content": prompt}]
-    )
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                ollama.chat,
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response = future.result(timeout=_AI_TIMEOUT)
+    except TimeoutError:
+        return None
     raw = response.message.content or ""  # pylint: disable=no-member
     raw = _strip_think_tags(raw)
     # Garbage response fallback: empty or very short after stripping
@@ -149,12 +163,34 @@ def _load_cache(path: str) -> dict:
 
 
 def _save_cache(path: str, data: dict) -> None:
-    """Save cache to JSON file."""
+    """Save cache to JSON file atomically."""
+    parent = os.path.dirname(os.path.abspath(path))
+    tmp_path: str | None = None
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        fd = tempfile.NamedTemporaryFile(  # pylint: disable=consider-using-with  # noqa: E501
+            mode="w", encoding="utf-8",
+            dir=parent, delete=False, suffix=".tmp",
+        )
+        tmp_path = fd.name
+        try:
+            json.dump(data, fd, indent=2)
+            fd.flush()
+            os.fsync(fd.fileno())
+        finally:
+            fd.close()
+        os.replace(tmp_path, path)
+        tmp_path = None  # success — don't clean up
     except OSError as e:
-        print(f"Warning: could not save cache: {e}", file=sys.stderr)
+        print(
+            f"Warning: could not save cache: {e}",
+            file=sys.stderr,
+        )
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +264,11 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
         return
 
     try:
-        summary, pseudocode = _summarize_with_ai(node, model)
+        result = _summarize_with_ai(node, model)
+        if result is None:
+            node.summary = "Summary timed out"
+            return
+        summary, pseudocode = result
         node.summary = summary
         node.pseudocode = pseudocode
         cache["entries"][key] = {"summary": summary, "pseudocode": pseudocode}
@@ -331,7 +371,11 @@ def _run_ai_batch(
                 return
         _progress(f"Analyzing {node.name}")
         try:
-            summary, pseudocode = _summarize_with_ai(node, model)
+            result = _summarize_with_ai(node, model)
+            if result is None:
+                node.summary = "Summary timed out"
+                return
+            summary, pseudocode = result
             with cache_lock:
                 node.summary = summary
                 node.pseudocode = pseudocode

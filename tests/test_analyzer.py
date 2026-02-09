@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -577,3 +578,80 @@ def test_quality_regular_python_file_still_scored():
     assert quality == "complex"
     assert warnings is not None
     assert any("600 lines" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: Security audit fixes 8-16
+# ---------------------------------------------------------------------------
+
+
+@patch("codedocent.analyzer.ollama")
+def test_summarize_timeout_returns_none(mock_ollama):
+    """Fix 11: AI call that exceeds timeout returns None."""
+    from codedocent.analyzer import _summarize_with_ai
+
+    def slow_chat(**kwargs):
+        time.sleep(5)
+        return MagicMock()
+
+    mock_ollama.chat.side_effect = slow_chat
+
+    node = _make_func_node(
+        source="def add(a, b):\n    return a + b\n    # extra\n",
+    )
+    with patch("codedocent.analyzer._AI_TIMEOUT", 0.1):
+        result = _summarize_with_ai(node, "test-model")
+
+    assert result is None
+
+
+@patch("codedocent.analyzer.ollama")
+def test_single_node_timeout_sets_summary(mock_ollama, tmp_path):
+    """Fix 11: analyze_single_node sets 'Summary timed out' on timeout."""
+    from codedocent.analyzer import analyze_single_node
+
+    def slow_chat(**kwargs):
+        time.sleep(5)
+        return MagicMock()
+
+    mock_ollama.chat.side_effect = slow_chat
+
+    node = _make_func_node(
+        source="def add(a, b):\n    return a + b\n    # extra\n",
+    )
+    node.filepath = str(tmp_path / "test.py")
+
+    with patch("codedocent.analyzer._AI_TIMEOUT", 0.1):
+        analyze_single_node(node, "test-model", str(tmp_path))
+
+    assert node.summary == "Summary timed out"
+
+
+def test_save_cache_atomic(tmp_path):
+    """Fix 15: atomic cache write produces valid JSON, no leftover .tmp."""
+    from codedocent.analyzer import _save_cache
+
+    cache_path = str(tmp_path / "cache.json")
+    data = {"version": 1, "model": "test", "entries": {"key": "value"}}
+
+    _save_cache(cache_path, data)
+
+    assert os.path.isfile(cache_path)
+    with open(cache_path, encoding="utf-8") as f:
+        loaded = json.load(f)
+    assert loaded == data
+
+    tmp_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
+    assert tmp_files == []
+
+
+def test_radon_syntax_error_returns_clean():
+    """Fix 12: syntactically invalid Python doesn't crash _score_quality."""
+    from codedocent.quality import _score_quality
+
+    node = _make_func_node(
+        name="bad_syntax",
+        source="def bad(\n    # missing closing paren and colon\n",
+    )
+    quality, warnings = _score_quality(node)
+    assert quality == "clean"

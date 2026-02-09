@@ -5,18 +5,19 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from datetime import datetime
 
 
 def _read_and_validate(
     filepath: str, start_line: int, end_line: int,
-) -> tuple[list[str] | None, str | None]:
+) -> tuple[list[str] | None, str | None, float, str]:
     """Read *filepath* and validate the line range.
 
-    Returns ``(lines, None)`` on success, or ``(None, error_message)``
-    on failure.
+    Returns ``(lines, None, mtime, line_ending)`` on success, or
+    ``(None, error_message, 0.0, "\\n")`` on failure.
     """
     if not os.path.isfile(filepath):
-        return (None, f"File not found: {filepath}")
+        return (None, f"File not found: {filepath}", 0.0, "\n")
     if (
         not isinstance(start_line, int)
         or not isinstance(end_line, int)
@@ -24,31 +25,71 @@ def _read_and_validate(
         or end_line < 1
         or start_line > end_line
     ):
-        return (None, f"Invalid line range: {start_line}-{end_line}")
+        return (
+            None,
+            f"Invalid line range: {start_line}-{end_line}",
+            0.0, "\n",
+        )
     try:
-        with open(filepath, encoding="utf-8") as f:
-            lines = f.readlines()
+        with open(filepath, "rb") as f:
+            raw = f.read()
+        mtime = os.stat(filepath).st_mtime
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return (None, "File is not valid UTF-8 text")
+        return (None, "File is not valid UTF-8 text", 0.0, "\n")
+
+    # Detect line ending style: CRLF vs LF
+    crlf_count = text.count("\r\n")
+    lf_count = text.count("\n") - crlf_count
+    line_ending = "\r\n" if crlf_count > lf_count else "\n"
+
+    lines = text.splitlines(True)
     if end_line > len(lines):
         return (
             None,
-            f"end_line {end_line} exceeds file length ({len(lines)} lines)",
+            f"end_line {end_line} exceeds file length"
+            f" ({len(lines)} lines)",
+            0.0, "\n",
         )
-    return (lines, None)
+    return (lines, None, mtime, line_ending)
 
 
-def _write_with_backup(filepath: str, lines: list[str]) -> None:
-    """Create a ``.bak`` backup and write *lines* back to *filepath*."""
-    shutil.copy2(filepath, filepath + ".bak")
+def _write_with_backup(
+    filepath: str, lines: list[str], mtime: float,
+) -> None:
+    """Create a timestamped ``.bak`` backup and write *lines* back.
+
+    Raises ``OSError`` if the file was modified externally since the
+    last read, if the backup could not be created, or on write failure.
+    """
+    if os.stat(filepath).st_mtime != mtime:
+        raise OSError("File was modified externally since last read")
+
+    backup_path = (
+        filepath + ".bak."
+        + datetime.now().strftime("%Y%m%dT%H%M%S")
+    )
+
+    if os.path.islink(backup_path):
+        os.unlink(backup_path)
+
+    shutil.copy2(filepath, backup_path)
+
+    if not os.path.exists(backup_path):
+        raise OSError(
+            "Backup creation failed: "
+            f"{backup_path} does not exist"
+        )
+
     parent_dir = os.path.dirname(os.path.abspath(filepath))
     fd = tempfile.NamedTemporaryFile(  # pylint: disable=consider-using-with
-        mode="w", encoding="utf-8",
+        mode="wb",
         dir=parent_dir, delete=False, suffix=".tmp",
     )
     tmp_path = fd.name
     try:
-        fd.writelines(lines)
+        for line in lines:
+            fd.write(line.encode("utf-8"))
         fd.flush()
         os.fsync(fd.fileno())
         fd.close()
@@ -70,14 +111,16 @@ def replace_block_source(
 ) -> dict:
     """Replace lines *start_line* through *end_line* (1-indexed, inclusive).
 
-    Creates a ``.bak`` backup before writing.  Returns a result dict with
-    ``success``, ``lines_before``, ``lines_after`` on success, or
-    ``success=False`` and ``error`` on failure.
+    Creates a timestamped ``.bak`` backup before writing.  Returns a
+    result dict with ``success``, ``lines_before``, ``lines_after`` on
+    success, or ``success=False`` and ``error`` on failure.
     """
     if not isinstance(new_source, str):
         return {"success": False, "error": "new_source must be a string"}
 
-    lines, error = _read_and_validate(filepath, start_line, end_line)
+    lines, error, mtime, line_ending = _read_and_validate(
+        filepath, start_line, end_line,
+    )
     if lines is None:
         return {"success": False, "error": error}
 
@@ -88,17 +131,15 @@ def replace_block_source(
         if new_source == "":
             new_lines: list[str] = []
         else:
-            new_lines = new_source.split("\n")
-            # Ensure every line ends with \n for consistency, except avoid
-            # adding an extra blank line when new_source already ends with \n.
-            if new_source.endswith("\n"):
-                new_lines = new_lines[:-1]  # last split element is ''
-            new_lines = [ln + "\n" for ln in new_lines]
+            raw_lines = new_source.splitlines(True)
+            new_lines = [
+                ln.rstrip("\r\n") + line_ending for ln in raw_lines
+            ]
 
         new_count = len(new_lines)
         lines[start_line - 1:end_line] = new_lines
 
-        _write_with_backup(filepath, lines)
+        _write_with_backup(filepath, lines, mtime)
 
         return {
             "success": True,

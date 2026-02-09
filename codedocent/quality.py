@@ -95,7 +95,7 @@ def _score_radon(node: CodeNode) -> tuple[str, str | None]:
                 f"High complexity (grade {rank},"
                 f" score {worst})",
             )
-    except (ImportError, AttributeError):  # nosec B110
+    except (ImportError, AttributeError, SyntaxError):  # nosec B110
         pass
 
     return "clean", None

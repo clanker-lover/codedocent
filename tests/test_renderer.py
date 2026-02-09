@@ -251,3 +251,43 @@ def test_render_interactive_excludes_source_from_json():
     html = render_interactive(root)
     # Source should not appear in the embedded JSON
     assert '"source"' not in html
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: Security audit fixes 8-16
+# ---------------------------------------------------------------------------
+
+
+def test_render_escapes_html_in_names(tmp_path):
+    """Fix 16: HTML in node names is escaped, not rendered raw."""
+    xss_name = "<script>alert(1)</script>"
+    node = CodeNode(
+        name=xss_name,
+        node_type="file",
+        language="python",
+        filepath="xss.py",
+        start_line=1,
+        end_line=1,
+        source="x = 1",
+        line_count=1,
+    )
+    root = CodeNode(
+        name="proj",
+        node_type="directory",
+        language=None,
+        filepath="/tmp/proj",
+        start_line=0,
+        end_line=0,
+        source="",
+        line_count=1,
+        children=[node],
+    )
+    out = str(tmp_path / "output.html")
+    render(root, out)
+    html = open(out).read()
+
+    # The escaped version must be present
+    assert "&lt;script&gt;" in html
+    # Raw <script>alert(1)</script> must NOT appear as actual tags
+    # (it may appear inside escaped attributes, but not as unescaped tags)
+    assert "<script>alert(1)</script>" not in html

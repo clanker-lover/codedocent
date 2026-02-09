@@ -72,7 +72,7 @@ def render_interactive(root: CodeNode) -> str:
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(str(template_dir)),
-        autoescape=False,  # nosec B701 — we embed raw JSON
+        autoescape=True,
     )
     template = env.get_template("interactive.html")
     tree_json = json.dumps(_node_to_dict(root))

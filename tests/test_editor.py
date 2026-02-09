@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import glob
 import os
+import time
 from pathlib import Path
+from unittest.mock import patch
 
-from codedocent.editor import replace_block_source
+import pytest
+
+from codedocent.editor import (
+    _read_and_validate,
+    _write_with_backup,
+    replace_block_source,
+)
 
 
 SAMPLE_CONTENT = "line1\nline2\nline3\nline4\nline5\n"
@@ -32,10 +41,10 @@ def test_successful_replacement(tmp_path: Path) -> None:
     assert "line1\n" in new_text
     assert "line4\n" in new_text
 
-    # Backup must exist with original content
-    bak = Path(str(p) + ".bak")
-    assert bak.exists()
-    assert bak.read_text(encoding="utf-8") == SAMPLE_CONTENT
+    # Backup must exist with original content (timestamped)
+    bak_files = glob.glob(str(p) + ".bak.*")
+    assert len(bak_files) == 1
+    assert Path(bak_files[0]).read_text(encoding="utf-8") == SAMPLE_CONTENT
 
 
 def test_replacement_shrinks_block(tmp_path: Path) -> None:
@@ -110,8 +119,9 @@ def test_bak_contains_original(tmp_path: Path) -> None:
 
     replace_block_source(str(p), 1, 5, "completely new\n")
 
-    bak = Path(str(p) + ".bak")
-    assert bak.read_text(encoding="utf-8") == original
+    bak_files = glob.glob(str(p) + ".bak.*")
+    assert len(bak_files) == 1
+    assert Path(bak_files[0]).read_text(encoding="utf-8") == original
 
 
 def test_non_utf8_file_returns_error(tmp_path: Path) -> None:
@@ -132,3 +142,121 @@ def test_atomic_write_leaves_no_temp_on_success(tmp_path: Path) -> None:
 
     tmp_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
     assert tmp_files == []
+
+
+# ---------------------------------------------------------------------------
+# Batch 2 new tests
+# ---------------------------------------------------------------------------
+
+
+def test_backup_is_timestamped(tmp_path: Path) -> None:
+    """Fix 8: backup suffix is YYYYMMDDTHHMMSS format."""
+    p = _write_sample(tmp_path)
+    replace_block_source(str(p), 2, 3, "replaced\n")
+
+    bak_files = glob.glob(str(p) + ".bak.*")
+    assert len(bak_files) == 1
+    # Extract timestamp suffix after ".bak."
+    suffix = bak_files[0].rsplit(".bak.", 1)[1]
+    assert len(suffix) == 15  # YYYYMMDDTHHMMSS
+    assert suffix[8] == "T"
+
+
+def test_multiple_saves_create_multiple_backups(tmp_path: Path) -> None:
+    """Fix 8: each save creates a distinct timestamped backup."""
+    p = _write_sample(tmp_path)
+    replace_block_source(str(p), 2, 2, "first\n")
+    time.sleep(1)
+    replace_block_source(str(p), 2, 2, "second\n")
+
+    bak_files = glob.glob(str(p) + ".bak.*")
+    assert len(bak_files) == 2
+    assert len(set(bak_files)) == 2  # distinct names
+
+
+def test_external_modification_detected(tmp_path: Path) -> None:
+    """Fix 9: stale mtime triggers OSError."""
+    p = _write_sample(tmp_path)
+    lines, error, mtime, line_ending = _read_and_validate(str(p), 1, 5)
+    assert lines is not None
+
+    # Simulate external modification by changing mtime
+    os.utime(str(p), (mtime + 10, mtime + 10))
+
+    with pytest.raises(OSError, match="modified externally"):
+        _write_with_backup(str(p), lines, mtime)
+
+
+def test_crlf_line_endings_preserved(tmp_path: Path) -> None:
+    """Fix 10: CRLF files stay CRLF after replacement."""
+    p = tmp_path / "crlf.py"
+    p.write_bytes(b"line1\r\nline2\r\nline3\r\n")
+
+    result = replace_block_source(str(p), 2, 2, "replaced\n")
+    assert result["success"] is True
+
+    raw = p.read_bytes()
+    # All line endings should be CRLF
+    assert b"\r\n" in raw
+    # No bare LF (every \n should be preceded by \r)
+    text = raw.decode("utf-8")
+    for i, ch in enumerate(text):
+        if ch == "\n":
+            assert i > 0 and text[i - 1] == "\r"
+
+
+def test_backup_verification_failure(tmp_path: Path) -> None:
+    """Fix 13: backup verification catches failed copy."""
+    p = _write_sample(tmp_path)
+    lines, error, mtime, line_ending = _read_and_validate(str(p), 1, 5)
+    assert lines is not None
+
+    original = p.read_text(encoding="utf-8")
+
+    with patch("codedocent.editor.shutil.copy2"):
+        with pytest.raises(OSError, match="Backup creation"):
+            _write_with_backup(str(p), lines, mtime)
+
+    # Original file must be untouched
+    assert p.read_text(encoding="utf-8") == original
+
+
+def test_symlink_at_backup_path_removed(tmp_path: Path) -> None:
+    """Fix 14: symlink at backup path is removed before copy."""
+    p = _write_sample(tmp_path)
+    original = p.read_text(encoding="utf-8")
+
+    # Pin the timestamp so we know the backup path
+    fixed_dt = "20260101T120000"
+    backup_path = str(p) + ".bak." + fixed_dt
+
+    # Create a symlink at the expected backup path
+    target = tmp_path / "dangling_target"
+    target.write_text("dangling", encoding="utf-8")
+    os.symlink(str(target), backup_path)
+    assert os.path.islink(backup_path)
+
+    with patch(
+        "codedocent.editor.datetime",
+    ) as mock_dt:
+        mock_dt.now.return_value.strftime.return_value = fixed_dt
+        result = replace_block_source(str(p), 2, 2, "replaced\n")
+
+    assert result["success"] is True
+    # Symlink should be replaced with a real file
+    assert not os.path.islink(backup_path)
+    assert os.path.isfile(backup_path)
+    assert Path(backup_path).read_text(encoding="utf-8") == original
+
+
+def test_lf_preserved_when_crlf_input(tmp_path: Path) -> None:
+    """Fix 10: LF file stays LF even when replacement text has CRLF."""
+    p = _write_sample(tmp_path)  # LF file
+
+    result = replace_block_source(str(p), 2, 2, "replaced\r\n")
+    assert result["success"] is True
+
+    raw = p.read_bytes()
+    # Should NOT contain CRLF — file is LF
+    assert b"\r\n" not in raw
+    assert b"replaced\n" in raw
