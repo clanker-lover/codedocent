@@ -20,6 +20,19 @@ Every piece of code becomes a **block** that shows:
 
 Blocks are **nested** — directories contain files, files contain classes, classes contain functions. Click to drill down. Breadcrumbs to navigate back up. Color-coded by language.
 
+### Code actions
+
+Every analyzed block gets a toolbar with one-click actions:
+
+| Button | What it does |
+|--------|-------------|
+| **Show Code** | Expand/collapse the source code inline |
+| **Export Code** | Copy raw source to clipboard |
+| **Copy for AI** | Copy source wrapped in a markdown code fence with context (block name, file path) — ready to paste into an AI assistant |
+| **Replace Code** | Open an editor to paste modified code back into the source file |
+
+**Replace Code** (available on functions, methods, and classes) lets you paste fixed or improved code — from an AI assistant, a code review, or your own edits — directly back into the original file. A `.bak` backup is created automatically before any write. The UI shows a confirmation step with success/error feedback, and all cached analysis is cleared so the block can be re-analyzed with the new code.
+
 ## Who it's for
 
 You understand systems. You can read a schematic. You just can't read Python.
@@ -114,16 +127,32 @@ Each block shows a quality badge based on static analysis, with warnings that ex
 
 Warnings roll up through the tree: a file inherits the worst quality of its functions, and a directory inherits the worst quality of its files. Each level shows a count of problematic children (e.g., "Contains 2 high-risk functions"). Quality scoring works for all supported languages — Python files also get [radon](https://radon.readthedocs.io/) cyclomatic complexity analysis.
 
+## Architecture
+
+```
+codedocent/
+├── cli.py          Command-line interface and entry point
+├── scanner.py      File discovery with .gitignore support
+├── parser.py       AST parsing via tree-sitter
+├── analyzer.py     AI summaries, quality scoring, caching
+├── editor.py       Code replacement with backup safety
+├── renderer.py     HTML generation (static + interactive)
+├── server.py       Local server for interactive mode
+└── templates/
+    └── interactive.html   Single-page app UI
+```
+
 ## Current status
 
-- ✅ Scanner, parser, renderer, analyzer, server, CLI — all built and tested
-- ✅ Interactive navigation with lazy AI analysis
-- ✅ Static HTML full-analysis mode with parallel workers
-- ✅ Code export — Show Code, Export Code, Copy for AI
-- ✅ Quality scoring with two-tier thresholds and warning rollup across the tree
-- ✅ pip-installable package with `codedocent` CLI entry point
-- ✅ 65 tests passing
-- ✅ Code quality: pylint 10/10, bandit/flake8/mypy all clean
+- Scanner, parser, renderer, analyzer, editor, server, CLI — all built and tested
+- Interactive navigation with lazy AI analysis
+- Static HTML full-analysis mode with parallel workers
+- Code actions — Show Code, Export Code, Copy for AI, Replace Code
+- Code replacement with `.bak` backup and cache invalidation
+- Quality scoring with two-tier thresholds and warning rollup across the tree
+- pip-installable package with `codedocent` CLI entry point
+- 75 tests passing
+- Code quality: pylint 10/10, bandit/flake8/mypy all clean
 
 ## License
 
