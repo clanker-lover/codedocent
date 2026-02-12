@@ -21,6 +21,9 @@ from codedocent.renderer import LANGUAGE_COLORS, DEFAULT_COLOR, NODE_ICONS
 IDLE_TIMEOUT = 300  # 5 minutes
 IDLE_CHECK_INTERVAL = 30  # seconds
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
+_TEMPLATES_DIR = os.path.realpath(
+    os.path.join(os.path.dirname(__file__), "templates"),
+)
 
 
 def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
@@ -179,18 +182,31 @@ def _execute_replace(  # pylint: disable=too-many-return-statements
     if node_id not in _Handler.node_lookup:
         return (404, {"success": False, "error": "Unknown node ID"})
     node = _Handler.node_lookup[node_id]
-    if node.node_type in ("directory", "file"):
+    if node.node_type == "directory":
         return (
             400,
             {"success": False,
-             "error": "Cannot replace directory/file blocks"},
+             "error": "Cannot replace directory blocks"},
         )
     new_source = body.get("source", "")
     if not isinstance(new_source, str):
         return (400, {"success": False, "error": "source must be a string"})
+    if len(new_source.encode("utf-8")) > 1_000_000:
+        return (
+            400,
+            {"success": False, "error": "Replacement too large (max 1MB)"},
+        )
     abs_path = _resolve_filepath(node, _Handler.cache_dir)
     real_path = os.path.realpath(abs_path)
     real_root = os.path.realpath(_Handler.cache_dir)
+    if real_path == _TEMPLATES_DIR or real_path.startswith(
+        _TEMPLATES_DIR + os.sep,
+    ):
+        return (
+            400,
+            {"success": False,
+             "error": "Cannot replace tool template files"},
+        )
     inside = real_path == real_root or real_path.startswith(
         real_root + os.sep,
     )

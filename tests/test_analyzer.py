@@ -157,8 +157,8 @@ def test_quality_complex_branchy():
 
     node = _make_func_node(name="decide", source=source)
     quality, warnings = _score_quality(node)
-    assert quality in ("complex", "warning")
-    assert warnings is not None
+    assert quality == "clean"
+    assert warnings is None
 
 
 def test_directory_summary_no_ai():
@@ -241,22 +241,6 @@ def test_strip_think_tags():
     result = _strip_think_tags(text)
     assert "<think>" not in result
     assert "SUMMARY: hello" in result
-
-
-def test_long_function_warning():
-    from codedocent.quality import _score_quality
-
-    # 56-line function
-    lines = ["def long_func():"]
-    for i in range(55):
-        lines.append(f"    x = {i}")
-    source = "\n".join(lines) + "\n"
-
-    node = _make_func_node(name="long_func", source=source)
-    node.line_count = 56
-    quality, warnings = _score_quality(node)
-    assert warnings is not None
-    assert any("Long function" in w for w in warnings)
 
 
 def test_many_params_warning():
@@ -410,93 +394,6 @@ def test_garbage_response_fallback(mock_ollama, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_quality_function_yellow_tier():
-    from codedocent.quality import _score_quality
-
-    # 60-line function (above 50 yellow, below 100 red)
-    lines = ["def long_func():"]
-    for i in range(59):
-        lines.append(f"    x = {i}")
-    source = "\n".join(lines) + "\n"
-
-    node = _make_func_node(name="long_func", source=source)
-    node.line_count = 60
-    quality, warnings = _score_quality(node)
-    assert quality == "complex"
-    assert warnings is not None
-    assert any("60 lines" in w for w in warnings)
-
-
-def test_quality_function_red_tier():
-    from codedocent.quality import _score_quality
-
-    # 110-line function (above 100 red)
-    lines = ["def very_long_func():"]
-    for i in range(109):
-        lines.append(f"    x = {i}")
-    source = "\n".join(lines) + "\n"
-
-    node = _make_func_node(name="very_long_func", source=source)
-    node.line_count = 110
-    quality, warnings = _score_quality(node)
-    assert quality == "warning"
-    assert warnings is not None
-    assert any("110 lines" in w for w in warnings)
-
-
-def test_quality_file_yellow_tier():
-    from codedocent.quality import _score_quality
-
-    # 550-line file (above 500 yellow, below 1000 red)
-    lines = [f"x_{i} = {i}" for i in range(550)]
-    source = "\n".join(lines) + "\n"
-
-    node = _make_file_node(name="big.py", source=source)
-    node.line_count = 550
-    quality, warnings = _score_quality(node)
-    assert quality == "complex"
-    assert warnings is not None
-    assert any("550 lines" in w for w in warnings)
-
-
-def test_quality_file_red_tier():
-    from codedocent.quality import _score_quality
-
-    # 1100-line file (above 1000 red)
-    lines = [f"x_{i} = {i}" for i in range(1100)]
-    source = "\n".join(lines) + "\n"
-
-    node = _make_file_node(name="huge.py", source=source)
-    node.line_count = 1100
-    quality, warnings = _score_quality(node)
-    assert quality == "warning"
-    assert warnings is not None
-    assert any("1100 lines" in w for w in warnings)
-
-
-def test_quality_class_yellow_tier():
-    from codedocent.quality import _score_quality
-
-    # 311-line class (above 300 yellow, below 600 red)
-    lines = ["class BigClass:"]
-    for i in range(310):
-        lines.append(f"    x_{i} = {i}")
-    source = "\n".join(lines) + "\n"
-
-    node = CodeNode(
-        name="BigClass",
-        node_type="class",
-        language="python",
-        filepath="test.py",
-        start_line=1,
-        end_line=311,
-        source=source,
-        line_count=311,
-    )
-    quality, warnings = _score_quality(node)
-    assert quality == "complex"
-
-
 def test_quality_rollup_to_file():
     from codedocent.quality import _rollup_quality
 
@@ -542,42 +439,6 @@ def test_quality_directory_returns_none():
     quality, warnings = _score_quality(node)
     assert quality is None
     assert warnings is None
-
-
-# ---------------------------------------------------------------------------
-# Phase 8: Exempt HTML templates and test files from line-count scoring
-# ---------------------------------------------------------------------------
-
-
-def test_quality_html_file_exempt_from_line_count():
-    from codedocent.quality import _score_quality
-
-    node = _make_file_node(name="base.html", lang="html", source="<div></div>\n")
-    node.line_count = 1500
-    quality, warnings = _score_quality(node)
-    assert quality == "clean"
-    assert warnings is None
-
-
-def test_quality_test_file_exempt_from_line_count():
-    from codedocent.quality import _score_quality
-
-    node = _make_file_node(name="test_foo.py", lang="python", source="x = 1\n")
-    node.line_count = 600
-    quality, warnings = _score_quality(node)
-    assert quality == "clean"
-    assert warnings is None
-
-
-def test_quality_regular_python_file_still_scored():
-    from codedocent.quality import _score_quality
-
-    node = _make_file_node(name="app.py", lang="python", source="x = 1\n")
-    node.line_count = 600
-    quality, warnings = _score_quality(node)
-    assert quality == "complex"
-    assert warnings is not None
-    assert any("600 lines" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -655,3 +516,69 @@ def test_radon_syntax_error_returns_clean():
     )
     quality, warnings = _score_quality(node)
     assert quality == "clean"
+
+
+# ---------------------------------------------------------------------------
+# Security fixes: replace endpoint guards
+# ---------------------------------------------------------------------------
+
+
+def test_replace_rejects_oversized_payload():
+    """Fix 1: payloads over 1 MB are rejected with 400 (byte-size)."""
+    from codedocent.server import _execute_replace, _Handler
+
+    node = _make_func_node(name="target", source="def target():\n    pass\n")
+    node.node_id = "test_node_001"
+    _Handler.node_lookup = {"test_node_001": node}
+    _Handler.cache_dir = "/tmp/test_proj"
+
+    giant = "x" * 1_000_001
+    status, result = _execute_replace("test_node_001", {"source": giant})
+    assert status == 400
+    assert "too large" in result["error"]
+
+
+def test_replace_rejects_template_filepath():
+    """Fix 3: files inside codedocent's templates dir are rejected."""
+    from codedocent.server import _execute_replace, _Handler, _TEMPLATES_DIR
+
+    for name in ("interactive.html", "base.html"):
+        tmpl_path = os.path.join(_TEMPLATES_DIR, name)
+        node = _make_file_node(name=name, source="<html></html>\n")
+        node.filepath = tmpl_path
+        node.node_id = "tmpl_node_001"
+        _Handler.node_lookup = {"tmpl_node_001": node}
+        _Handler.cache_dir = _TEMPLATES_DIR
+
+        status, result = _execute_replace(
+            "tmpl_node_001", {"source": "<p>hacked</p>"},
+        )
+        assert status == 400
+        assert "Cannot replace tool template files" in result["error"]
+
+
+def test_replace_accepts_file_node(tmp_path):
+    """Happy-path: file-level replace succeeds end-to-end."""
+    from codedocent.server import _execute_replace, _Handler
+
+    original = "x = 1\ny = 2\n"
+    replacement = "x = 10\ny = 20\nz = 30\n"
+
+    target = tmp_path / "test.py"
+    target.write_text(original, encoding="utf-8")
+
+    node = _make_file_node(name="test.py", source=original)
+    node.filepath = str(target)
+    node.node_id = "file_node_001"
+    _Handler.node_lookup = {"file_node_001": node}
+    _Handler.cache_dir = str(tmp_path)
+    _Handler.root = _make_dir_node(
+        name="proj", children=[node], filepath=str(tmp_path),
+    )
+
+    status, result = _execute_replace(
+        "file_node_001", {"source": replacement},
+    )
+    assert status == 200
+    assert result["success"] is True
+    assert target.read_text(encoding="utf-8") == replacement

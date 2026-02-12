@@ -671,18 +671,16 @@ function cdCreateCodeActions(bodyEl, nodeId, nodeType, nodeName, filepath, langu
     });
     actions.appendChild(btnAI);
 
-    if (nodeType === 'function' || nodeType === 'method' || nodeType === 'class') {
-        var btnReplace = document.createElement('button');
-        btnReplace.className = 'cd-code-btn';
-        btnReplace.textContent = 'Replace Code';
-        btnReplace.addEventListener('click', function(e) {
-            e.stopPropagation();
-            ensureSource(function(source) {
-                cdShowReplacePanel(bodyEl, nodeId, source, pre, btnShow);
-            });
+    var btnReplace = document.createElement('button');
+    btnReplace.className = 'cd-code-btn';
+    btnReplace.textContent = 'Replace Code';
+    btnReplace.addEventListener('click', function(e) {
+        e.stopPropagation();
+        ensureSource(function(source) {
+            cdShowReplacePanel(bodyEl, nodeId, source, pre, btnShow);
         });
-        actions.appendChild(btnReplace);
-    }
+    });
+    actions.appendChild(btnReplace);
 
     var childrenEl = bodyEl.querySelector('.cd-node__children');
     if (childrenEl) {

@@ -1,19 +1,9 @@
-"""Quality scoring: complexity, line counts, and parameter checks."""
+"""Quality scoring: complexity and parameter checks."""
 
 from __future__ import annotations
 
-import os
-
 from codedocent.parser import CodeNode
 
-# Quality scoring thresholds: (yellow_threshold, red_threshold)
-# yellow = "complex", red = "warning"
-LINE_THRESHOLDS: dict[str, tuple[int, int]] = {
-    "function": (50, 100),
-    "method": (50, 100),
-    "file": (500, 1000),
-    "class": (300, 600),
-}
 PARAM_THRESHOLD = 5
 
 
@@ -82,60 +72,22 @@ def _score_radon(node: CodeNode) -> tuple[str, str | None]:
         if blocks:
             worst = max(b.complexity for b in blocks)
             rank = cc_rank(worst)
-            if rank in ("A", "B"):
+            if rank in ("A", "B", "C"):
                 return "clean", None
-            if rank == "C":
+            if rank == "D":
                 return (
                     "complex",
-                    f"Moderate complexity (grade {rank},"
+                    f"High complexity (grade {rank},"
                     f" score {worst})",
                 )
             return (
                 "warning",
-                f"High complexity (grade {rank},"
+                f"Severe complexity (grade {rank},"
                 f" score {worst})",
             )
     except (ImportError, AttributeError, SyntaxError):  # nosec B110
         pass
 
-    return "clean", None
-
-
-def _is_exempt_file(node: CodeNode) -> bool:
-    """Check if a file node should skip line-count scoring.
-
-    HTML templates and test files are naturally long, so line count
-    does not indicate poor quality for these file types.
-    """
-    if node.node_type != "file":
-        return False
-    if node.language == "html":
-        return True
-    if node.language is None and node.name.endswith(".html"):
-        return True
-    if os.path.basename(node.name).startswith("test_"):
-        return True
-    return False
-
-
-def _score_line_count(node: CodeNode) -> tuple[str, str | None]:
-    """Score based on line-count thresholds (two-tier: yellow/red)."""
-    if _is_exempt_file(node):
-        return "clean", None
-    thresholds = LINE_THRESHOLDS.get(node.node_type)
-    if thresholds and node.line_count:
-        yellow, red = thresholds
-        if node.line_count > red:
-            return (
-                "warning",
-                f"This {node.node_type} is"
-                f" {node.line_count} lines long",
-            )
-        if node.line_count > yellow:
-            return (
-                "complex",
-                f"Long {node.node_type}: {node.line_count} lines",
-            )
     return "clean", None
 
 
@@ -162,7 +114,7 @@ def _score_quality(
     warnings: list[str] = []
     quality = "clean"
 
-    for scorer in (_score_radon, _score_line_count, _score_param_count):
+    for scorer in (_score_radon, _score_param_count):
         label, warning = scorer(node)
         quality = _worst_quality(quality, label)
         if warning:
