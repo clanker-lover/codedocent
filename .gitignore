@@ -24,3 +24,5 @@ dist/
 # Editor backups
 *.bak
 .aider*
+benchmark.py
+benchmark_results.txt
