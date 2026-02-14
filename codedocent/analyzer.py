@@ -335,7 +335,8 @@ def analyze_single_node(  # pylint: disable=too-many-locals
         ConnectionError, RuntimeError, ValueError,
         OSError, AttributeError, TypeError,
     ) as e:
-        node.summary = f"Summary generation failed: {e}"
+        print(f"  AI error for {node.name}: {e}", file=sys.stderr)
+        node.summary = "Summary generation failed"
 
 
 # ---------------------------------------------------------------------------

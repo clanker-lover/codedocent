@@ -328,7 +328,7 @@ def test_build_ai_config_openai():
     assert config["backend"] == "cloud"
     assert config["provider"] == "openai"
     assert config["model"] == "gpt-4.1-nano"
-    assert config["api_key"] == "test-key-not-real"
+    assert config["api_key"].reveal() == "test-key-not-real"
 
 
 def test_build_ai_config_custom_without_endpoint():
@@ -362,4 +362,4 @@ def test_build_ai_config_custom_env_var():
         config = _build_ai_config(args)
 
     assert config is not None
-    assert config["api_key"] == "test-key-not-real"
+    assert config["api_key"].reveal() == "test-key-not-real"

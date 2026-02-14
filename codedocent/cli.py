@@ -6,7 +6,9 @@ import argparse
 import os
 import sys
 
-from codedocent.cloud_ai import CLOUD_PROVIDERS, validate_cloud_config
+from codedocent.cloud_ai import (
+    CLOUD_PROVIDERS, validate_cloud_config, _MaskedSecret,
+)
 from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 from codedocent.parser import CodeNode, parse_directory
 from codedocent.scanner import scan_directory
@@ -152,7 +154,7 @@ def _wizard_cloud_setup() -> dict | None:
         "backend": "cloud",
         "provider": provider,
         "endpoint": endpoint,
-        "api_key": api_key,
+        "api_key": _MaskedSecret(api_key),
         "model": model,
     }
 
@@ -307,8 +309,8 @@ def _build_ai_config(args: argparse.Namespace) -> dict | None:
     from codedocent.cloud_ai import _validate_endpoint  # pylint: disable=import-outside-toplevel  # noqa: E501
     try:
         _validate_endpoint(endpoint)
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except ValueError:
+        print("Error: Invalid endpoint URL", file=sys.stderr)
         sys.exit(1)
 
     # API key
@@ -326,7 +328,7 @@ def _build_ai_config(args: argparse.Namespace) -> dict | None:
         "backend": "cloud",
         "provider": provider,
         "endpoint": endpoint,
-        "api_key": api_key,
+        "api_key": _MaskedSecret(api_key),
         "model": args.model,
     }
 

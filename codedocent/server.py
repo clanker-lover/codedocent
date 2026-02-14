@@ -169,7 +169,7 @@ def _analyze_node(node_id: str) -> dict | None:
                     f"analyze error for {node_id}: {exc}",
                     file=sys.stderr, flush=True,
                 )
-                node.summary = f"Analysis failed: {exc}"
+                node.summary = "Analysis failed"
     return _node_to_dict(node, include_source=True)
 
 
@@ -272,9 +272,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _touch(self):
         _Handler.last_request_time[0] = time.time()
 
+    def _check_host(self) -> bool:
+        """Reject requests with unexpected Host headers."""
+        host = self.headers.get("Host", "")
+        hostname = host.split(":")[0].lower()
+        if hostname not in ("127.0.0.1", "localhost", "::1", "[::1]", ""):
+            self.send_error(403, "Forbidden")
+            return False
+        return True
+
     def do_GET(self):  # pylint: disable=invalid-name
         """Handle GET requests."""
         self._touch()
+        if not self._check_host():
+            return
         if self.path == "/":
             self._serve_html()
         elif self.path.startswith("/api/"):
@@ -297,6 +308,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # pylint: disable=invalid-name
         """Handle POST requests."""
         self._touch()
+        if not self._check_host():
+            return
         token = self.headers.get("X-Codedocent-Token", "")
         if token != _Handler.csrf_token:
             self._send_json(403, {"error": "Invalid or missing CSRF token"})
