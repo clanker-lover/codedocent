@@ -64,6 +64,7 @@ class _MaskedSecret:
         self._value = value
 
     def reveal(self) -> str:
+        """Return the unwrapped secret value."""
         return self._value
 
     def __repr__(self) -> str:
@@ -128,11 +129,9 @@ def cloud_chat(
         "max_tokens": 1024,
     }).encode("utf-8")
 
+    key = api_key.reveal() if isinstance(api_key, _MaskedSecret) else api_key
     headers = {
-        "Authorization": "Bearer {}".format(
-            api_key.reveal()
-            if isinstance(api_key, _MaskedSecret) else api_key
-        ),
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "User-Agent": _USER_AGENT,
     }

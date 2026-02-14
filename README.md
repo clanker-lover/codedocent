@@ -10,7 +10,7 @@ A docent is a guide who explains things to people who aren't experts. Codedocent
 
 You're staring at a codebase you didn't write — maybe thousands of files across dozens of directories — and you need to understand what it does. Reading every file isn't realistic. You need a way to visualize the code structure, get a high-level map of what's where, and drill into the parts that matter without losing context.
 
-Codedocent parses the codebase into a navigable, visual block structure and explains each piece in plain English. It's an AI code analysis tool that runs entirely on your machine — no API keys, no cloud, no data leaving your laptop. Point it at any codebase and get a structural overview you can explore interactively, understand quickly, and share as a static HTML file.
+Codedocent parses the codebase into a navigable, visual block structure and explains each piece in plain English. It's an AI code analysis tool — use a cloud provider for speed or run locally through Ollama for full privacy. Point it at any codebase and get a structural overview you can explore interactively, understand quickly, and share as a static HTML file.
 
 ## Who this is for
 
@@ -23,7 +23,7 @@ Codedocent parses the codebase into a navigable, visual block structure and expl
 
 ## What you see
 
-Nested, color-coded blocks representing directories, files, classes, and functions — the entire structure of a codebase laid out visually. Each block shows a plain English summary, a pseudocode translation, and quality warnings (green/yellow/red). Click any block to drill down; breadcrumbs navigate you back up. You can export code from any block or paste replacement code back into the source file. All AI runs locally through Ollama — nothing leaves your machine.
+Nested, color-coded blocks representing directories, files, classes, and functions — the entire structure of a codebase laid out visually. Each block shows a plain English summary, a pseudocode translation, and quality warnings (green/yellow/red). Click any block to drill down; breadcrumbs navigate you back up. You can export code from any block or paste replacement code back into the source file. AI explanations come from your choice of cloud provider or local Ollama.
 
 ## Install
 
@@ -31,7 +31,7 @@ Nested, color-coded blocks representing directories, files, classes, and functio
 pip install codedocent
 ```
 
-Requires Python 3.10+ and [Ollama](https://ollama.com) running locally for AI features. Works without AI too (`--no-ai`).
+Requires Python 3.10+. Cloud AI needs an API key set in an env var (e.g. `OPENAI_API_KEY`). Local AI needs [Ollama](https://ollama.com) running. `--no-ai` skips AI entirely.
 
 ## Quick start
 
@@ -40,15 +40,22 @@ codedocent                         # setup wizard — walks you through everythi
 codedocent /path/to/code           # interactive mode (recommended)
 codedocent /path/to/code --full    # full analysis, static HTML output
 codedocent --gui                   # graphical launcher
+codedocent /path/to/code --cloud openai    # use OpenAI
+codedocent /path/to/code --cloud groq      # use Groq
+codedocent /path/to/code --cloud custom --endpoint https://my-llm/v1/chat/completions
 ```
 
 ## How it works
 
-Parses code structure with tree-sitter, scores quality with static analysis, and sends individual blocks to a local Ollama model for plain English summaries and pseudocode. Interactive mode analyzes on click — typically 1-2 seconds per block. Full mode analyzes everything upfront into a self-contained HTML file you can share.
+Parses code structure with tree-sitter, scores quality with static analysis, and sends individual blocks to a cloud AI provider or local Ollama model for plain English summaries and pseudocode. Interactive mode analyzes on click — typically 1-2 seconds per block. Full mode analyzes everything upfront into a self-contained HTML file you can share.
 
-## Why local
+## AI options
 
-All AI processing runs through Ollama on your machine. Your code is never uploaded, transmitted, or stored anywhere external. No API keys, no accounts, no cloud services. This matters when you're working with proprietary code, client projects, or anything you can't share — codedocent works fully air-gapped. The `--no-ai` mode removes the AI dependency entirely while keeping the structural visualization and quality scoring.
+- **Cloud AI** — send code to OpenAI, OpenRouter, Groq, or any OpenAI-compatible endpoint. Fast, no local setup. Your code is sent to that service. API keys are read from env vars (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `CODEDOCENT_API_KEY` for custom endpoints).
+- **Local AI** — [Ollama](https://ollama.com) on your machine. Code never leaves your laptop. No API keys, no accounts.
+- **No AI** (`--no-ai`) — structure and quality scores only.
+
+The setup wizard (`codedocent` with no args) walks you through choosing.
 
 ## Supported languages
 
