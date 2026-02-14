@@ -115,13 +115,49 @@ def _parse_ai_response(text: str) -> tuple[str, str]:
 _AI_TIMEOUT = 120
 
 
-def _summarize_with_ai(
-    node: CodeNode, model: str
+def _summarize_with_cloud(
+    node: CodeNode, ai_config: dict,
 ) -> tuple[str, str] | None:
-    """Call ollama to get summary and pseudocode for a node.
+    """Call a cloud AI endpoint for summary and pseudocode.
+
+    Returns ``None`` if the call times out.
+    Raises ``RuntimeError`` on API errors.
+    """
+    from codedocent.cloud_ai import cloud_chat  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+    prompt = _build_prompt(node, ai_config["model"])
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(
+        cloud_chat,
+        prompt, ai_config["endpoint"],
+        ai_config["api_key"], ai_config["model"],
+    )
+    try:
+        raw = future.result(timeout=_AI_TIMEOUT)
+    except TimeoutError:
+        future.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
+        return None
+    pool.shutdown(wait=False)
+    raw = _strip_think_tags(raw)
+    if not raw or len(raw) < 10:
+        return ("Could not generate summary", "")
+    summary, pseudocode = _parse_ai_response(raw)
+    if not summary or len(summary) < 5:
+        summary = "Could not generate summary"
+    return summary, pseudocode
+
+
+def _summarize_with_ai(
+    node: CodeNode, model: str, ai_config: dict | None = None,
+) -> tuple[str, str] | None:
+    """Call ollama (or cloud) to get summary and pseudocode for a node.
 
     Returns ``None`` if the AI call times out.
     """
+    if ai_config and ai_config.get("backend") == "cloud":
+        return _summarize_with_cloud(node, ai_config)
+
     prompt = _build_prompt(node, model)
     pool = ThreadPoolExecutor(max_workers=1)
     future = pool.submit(
@@ -149,6 +185,13 @@ def _summarize_with_ai(
     if not summary or len(summary) < 5:
         summary = "Could not generate summary"
     return summary, pseudocode
+
+
+def _cache_model_id(model: str, ai_config: dict | None = None) -> str:
+    """Return a cache-key model identifier."""
+    if ai_config and ai_config.get("backend") == "cloud":
+        return f"cloud:{ai_config['provider']}:{ai_config['model']}"
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +278,16 @@ def assign_node_ids(root: CodeNode) -> dict[str, CodeNode]:
 # ---------------------------------------------------------------------------
 
 
-def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
+def analyze_single_node(  # pylint: disable=too-many-locals
+    node: CodeNode, model: str, cache_dir: str,
+    *, ai_config: dict | None = None,
+) -> None:
     """Run quality scoring + AI analysis on a single node.
 
     Reads/writes the cache. Applies min-lines guard and garbage fallback.
     """
-    if ollama is None:
+    is_cloud = ai_config and ai_config.get("backend") == "cloud"
+    if not is_cloud and ollama is None:
         node.summary = "AI unavailable (ollama not installed)"
         return
 
@@ -263,8 +310,9 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
     cache_path = os.path.join(cache_dir, CACHE_FILENAME)
     cache = _load_cache(cache_path)
 
-    if cache.get("model") != model:
-        cache = {"version": 1, "model": model, "entries": {}}
+    model_id = _cache_model_id(model, ai_config)
+    if cache.get("model") != model_id:
+        cache = {"version": 1, "model": model_id, "entries": {}}
 
     key = _cache_key(node)
     if key in cache["entries"]:
@@ -274,7 +322,7 @@ def analyze_single_node(node: CodeNode, model: str, cache_dir: str) -> None:
         return
 
     try:
-        result = _summarize_with_ai(node, model)
+        result = _summarize_with_ai(node, model, ai_config=ai_config)
         if result is None:
             node.summary = "Summary timed out"
             return
@@ -359,6 +407,7 @@ def _run_ai_batch(
     model: str,
     cache: dict,
     workers: int,
+    ai_config: dict | None = None,
 ) -> int:
     """Phases 2 & 3: AI-analyze files then code nodes."""
     total, counter = len(all_nodes), [0]
@@ -384,7 +433,7 @@ def _run_ai_batch(
                 return
         _progress(f"Analyzing {node.name}")
         try:
-            result = _summarize_with_ai(node, model)
+            result = _summarize_with_ai(node, model, ai_config=ai_config)
             if result is None:
                 node.summary = "Summary timed out"
                 return
@@ -425,13 +474,16 @@ def _require_ollama() -> None:
         sys.exit(1)
 
 
-def _init_cache(root: CodeNode, model: str) -> tuple[str, dict]:
+def _init_cache(
+    root: CodeNode, model: str, ai_config: dict | None = None,
+) -> tuple[str, dict]:
     """Load (or reset) the analysis cache for *model*."""
     cache_dir = root.filepath or "."
     cache_path = os.path.join(cache_dir, CACHE_FILENAME)
     cache = _load_cache(cache_path)
-    if cache.get("model") != model:
-        cache = {"version": 1, "model": model, "entries": {}}
+    model_id = _cache_model_id(model, ai_config)
+    if cache.get("model") != model_id:
+        cache = {"version": 1, "model": model_id, "entries": {}}
     return cache_path, cache
 
 
@@ -439,11 +491,15 @@ def analyze(
     root: CodeNode,
     model: str = "qwen3:14b",
     workers: int = 1,
+    *,
+    ai_config: dict | None = None,
 ) -> CodeNode:
     """Analyze the full tree with AI summaries and quality scoring."""
-    _require_ollama()
+    is_cloud = ai_config and ai_config.get("backend") == "cloud"
+    if not is_cloud:
+        _require_ollama()
 
-    cache_path, cache = _init_cache(root, model)
+    cache_path, cache = _init_cache(root, model, ai_config=ai_config)
     all_nodes = _collect_nodes(root)
     start_time = time.monotonic()
 
@@ -451,12 +507,22 @@ def analyze(
     _rollup_file_quality(all_nodes)
 
     try:
-        ai_count = _run_ai_batch(all_nodes, model, cache, workers)
+        ai_count = _run_ai_batch(
+            all_nodes, model, cache, workers, ai_config=ai_config,
+        )
     except ConnectionError as e:
         print(
             f"\nError: Could not connect to ollama: {e}\n"
             "Make sure ollama is running (ollama serve),"
             " or use --no-ai to skip AI analysis.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except RuntimeError as e:
+        print(
+            f"\nError: Cloud AI request failed: {e}\n"
+            "Check your API key and endpoint, or use --no-ai"
+            " to skip AI analysis.",
             file=sys.stderr,
         )
         sys.exit(1)

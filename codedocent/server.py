@@ -162,6 +162,7 @@ def _analyze_node(node_id: str) -> dict | None:
             try:
                 analyze_single_node(
                     node, _Handler.model, _Handler.cache_dir,
+                    ai_config=_Handler.ai_config,
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 print(
@@ -260,6 +261,7 @@ class _Handler(BaseHTTPRequestHandler):
     node_lookup: dict[str, CodeNode] = {}
     model: str = ""
     cache_dir: str = "."
+    ai_config: dict | None = None
     analyze_lock: threading.Lock = threading.Lock()
     last_request_time: list[float] = [0.0]
     server_ref: socketserver.TCPServer | None = None
@@ -408,6 +410,7 @@ def _setup_handler_state(
     root: CodeNode,
     node_lookup: dict[str, CodeNode],
     model: str,
+    ai_config: dict | None = None,
 ) -> None:
     """Populate _Handler class-level shared state."""
     from codedocent.renderer import render_interactive  # pylint: disable=import-outside-toplevel  # noqa: E501
@@ -420,6 +423,7 @@ def _setup_handler_state(
     _Handler.node_lookup = node_lookup
     _Handler.model = model
     _Handler.cache_dir = root.filepath or "."
+    _Handler.ai_config = ai_config
     _Handler.analyze_lock = threading.Lock()
     _Handler.last_request_time = [time.time()]
 
@@ -444,12 +448,14 @@ def _install_sigint_handler(server):
     return original
 
 
-def start_server(
+def start_server(  # pylint: disable=too-many-arguments
     root: CodeNode,
     node_lookup: dict[str, CodeNode],
     model: str,
     port: int | None = None,
     open_browser: bool = True,
+    *,
+    ai_config: dict | None = None,
 ) -> None:
     """Start the interactive server.
 
@@ -458,7 +464,7 @@ def start_server(
     if port is None:
         port = _find_open_port()
 
-    _setup_handler_state(root, node_lookup, model)
+    _setup_handler_state(root, node_lookup, model, ai_config=ai_config)
 
     server = socketserver.ThreadingTCPServer(
         ("127.0.0.1", port), _Handler,

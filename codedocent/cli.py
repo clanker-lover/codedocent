@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 
+from codedocent.cloud_ai import CLOUD_PROVIDERS, validate_cloud_config
 from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 from codedocent.parser import CodeNode, parse_directory
 from codedocent.scanner import scan_directory
@@ -88,28 +89,111 @@ def _pick_model(models: list[str]) -> str:
     return models[0]
 
 
+def _wizard_cloud_setup() -> dict | None:
+    """Handle the cloud AI setup sub-flow of the wizard.
+
+    Returns an ai_config dict on success, or None if the user
+    cannot proceed (exits with instructions).
+    """
+    print("\nWhich cloud provider?")
+    providers = ["openai", "openrouter", "groq", "custom"]
+    for i, p in enumerate(providers, 1):
+        print(f"  {i}. {CLOUD_PROVIDERS[p]['name']}")
+    choice = _safe_input("Provider [1]: ").strip()
+    try:
+        idx = int(choice) - 1 if choice else 0
+        if not 0 <= idx < len(providers):
+            idx = 0
+    except ValueError:
+        idx = 0
+    provider = providers[idx]
+
+    info = CLOUD_PROVIDERS[provider]
+    endpoint = info["endpoint"]
+
+    if provider == "custom":
+        endpoint = _safe_input("Endpoint URL: ").strip()
+        if not endpoint:
+            print("Error: custom provider requires an endpoint URL.")
+            sys.exit(1)
+
+    env_var = info["env_var"]
+    api_key = os.environ.get(env_var, "")
+    if api_key:
+        print(f"API key found in ${env_var}")
+    else:
+        print(
+            f"\nAPI key not found. Set it with:\n"
+            f"  export {env_var}=your-key-here\n"
+            f"Then run codedocent again."
+        )
+        sys.exit(1)
+
+    # Model picker
+    models = info["models"]
+    if models:
+        model = _pick_model(models)
+    else:
+        model = _safe_input("Model name: ").strip()
+        if not model:
+            print("Error: model name is required.")
+            sys.exit(1)
+
+    # Validate
+    print("Testing connection...", end=" ", flush=True)
+    ok, err = validate_cloud_config(provider, endpoint, api_key, model)
+    if ok:
+        print("success!")
+    else:
+        print(f"failed: {err}")
+        sys.exit(1)
+
+    return {
+        "backend": "cloud",
+        "provider": provider,
+        "endpoint": endpoint,
+        "api_key": api_key,
+        "model": model,
+    }
+
+
 def _run_wizard() -> argparse.Namespace:
     """Interactive setup wizard for codedocent."""
     print("\ncodedocent \u2014 code visualization for humans\n")
 
     path = _ask_folder()
 
-    # --- Ollama check ---
+    # --- Backend choice ---
     model = "qwen3:14b"
     no_ai = False
+    ai_config = None
 
-    print("Checking for Ollama...", end=" ", flush=True)
-    if _check_ollama():
-        print("found!")
-        models = _fetch_ollama_models()
-        if models:
-            model = _pick_model(models)
-        else:
-            print("No models found.")
-            no_ai = _ask_no_ai_fallback()
+    print("How would you like Codedocent to understand your code?")
+    print("  [1] Cloud AI \u2014 Uses a service like OpenAI or OpenRouter.")
+    print("  [2] Local AI \u2014 Uses Ollama running on your machine.")
+    print("  [3] No AI \u2014 Just show code structure and quality scores.")
+    backend_choice = _safe_input("Choice [2]: ").strip()
+
+    if backend_choice == "1":
+        ai_config = _wizard_cloud_setup()
+        if ai_config:
+            model = ai_config["model"]
+    elif backend_choice == "3":
+        no_ai = True
     else:
-        print("not found.")
-        no_ai = _ask_no_ai_fallback()
+        # Default: Local AI (Ollama)
+        print("Checking for Ollama...", end=" ", flush=True)
+        if _check_ollama():
+            print("found!")
+            models = _fetch_ollama_models()
+            if models:
+                model = _pick_model(models)
+            else:
+                print("No models found.")
+                no_ai = _ask_no_ai_fallback()
+        else:
+            print("not found.")
+            no_ai = _ask_no_ai_fallback()
 
     # --- Mode ---
     print("\nHow do you want to view it?")
@@ -133,6 +217,10 @@ def _run_wizard() -> argparse.Namespace:
         port=None,
         workers=1,
         gui=False,
+        cloud=ai_config["provider"] if ai_config else None,
+        endpoint=ai_config["endpoint"] if ai_config else None,
+        api_key_env=None,
+        ai_config=ai_config,
     )
 
 
@@ -156,7 +244,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model", default="qwen3:14b",
-        help="Ollama model for AI summaries (default: qwen3:14b)",
+        help="AI model for summaries (default: qwen3:14b)",
     )
     parser.add_argument(
         "--no-ai", action="store_true",
@@ -178,7 +266,69 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--gui", action="store_true",
         help="Open GUI launcher",
     )
+    parser.add_argument(
+        "--cloud",
+        choices=["openai", "openrouter", "groq", "custom"],
+        default=None,
+        help="Use cloud AI provider instead of Ollama",
+    )
+    parser.add_argument(
+        "--endpoint", default=None,
+        help="Custom endpoint URL (required with --cloud custom)",
+    )
+    parser.add_argument(
+        "--api-key-env", default=None,
+        help="Override environment variable name for the API key",
+    )
     return parser
+
+
+def _build_ai_config(args: argparse.Namespace) -> dict | None:
+    """Build an ai_config dict from parsed CLI args, or None for ollama."""
+    if args.cloud is None:
+        return None
+
+    provider = args.cloud
+    info = CLOUD_PROVIDERS[provider]
+
+    # Endpoint
+    if provider == "custom":
+        if not args.endpoint:
+            print(
+                "Error: --endpoint is required with --cloud custom",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        endpoint = args.endpoint
+    else:
+        endpoint = args.endpoint or info["endpoint"]
+
+    # Validate endpoint
+    from codedocent.cloud_ai import _validate_endpoint  # pylint: disable=import-outside-toplevel  # noqa: E501
+    try:
+        _validate_endpoint(endpoint)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # API key
+    env_var = args.api_key_env or info["env_var"]
+    api_key = os.environ.get(env_var, "")
+    if not api_key:
+        print(
+            f"Error: API key not found. Set it with:\n"
+            f"  export {env_var}=your-key-here",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return {
+        "backend": "cloud",
+        "provider": provider,
+        "endpoint": endpoint,
+        "api_key": api_key,
+        "model": args.model,
+    }
 
 
 def _run_text_mode(tree: CodeNode) -> None:
@@ -201,18 +351,20 @@ def _run_no_ai_mode(tree: CodeNode, output: str) -> None:
 
 def _run_full_mode(
     tree: CodeNode, model: str, workers: int, output: str,
+    ai_config: dict | None = None,
 ) -> None:
     """Full mode: upfront AI analysis, static HTML."""
     from codedocent.analyzer import analyze  # pylint: disable=import-outside-toplevel  # noqa: E501
     from codedocent.renderer import render  # pylint: disable=import-outside-toplevel  # noqa: E501
 
-    analyze(tree, model=model, workers=workers)
+    analyze(tree, model=model, workers=workers, ai_config=ai_config)
     render(tree, output)
     print(f"HTML output written to {output}")
 
 
 def _run_interactive_mode(
     tree: CodeNode, model: str, port: int | None,
+    ai_config: dict | None = None,
 ) -> None:
     """Default lazy mode: interactive server."""
     from codedocent.analyzer import analyze_no_ai, assign_node_ids  # pylint: disable=import-outside-toplevel  # noqa: E501
@@ -220,7 +372,8 @@ def _run_interactive_mode(
 
     analyze_no_ai(tree)
     node_lookup = assign_node_ids(tree)
-    start_server(tree, node_lookup, model=model, port=port)
+    start_server(tree, node_lookup, model=model, port=port,
+                 ai_config=ai_config)
 
 
 def main() -> None:
@@ -236,6 +389,9 @@ def main() -> None:
 
     if args.path is None:
         args = _run_wizard()
+        ai_config = getattr(args, "ai_config", None)
+    else:
+        ai_config = _build_ai_config(args)
 
     scanned = scan_directory(args.path)
     tree = parse_directory(scanned, root=args.path)
@@ -245,9 +401,11 @@ def main() -> None:
     elif args.no_ai:
         _run_no_ai_mode(tree, args.output)
     elif args.full:
-        _run_full_mode(tree, args.model, args.workers, args.output)
+        _run_full_mode(tree, args.model, args.workers, args.output,
+                       ai_config=ai_config)
     else:
-        _run_interactive_mode(tree, args.model, args.port)
+        _run_interactive_mode(tree, args.model, args.port,
+                              ai_config=ai_config)
 
 
 if __name__ == "__main__":

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404
 import sys
 import threading
 
+from codedocent.cloud_ai import CLOUD_PROVIDERS
 from codedocent.ollama_utils import check_ollama, fetch_ollama_models
 
 try:
@@ -42,19 +44,69 @@ def _create_folder_row(frame: ttk.Frame) -> tk.StringVar:
     return folder_var
 
 
+def _create_backend_row(frame: ttk.Frame) -> tk.StringVar:
+    """Create backend radio buttons (Cloud AI / Local AI)."""
+    ttk.Label(frame, text="AI Backend:").grid(
+        row=2, column=0, sticky="w", pady=(12, 4),
+    )
+    backend_var = tk.StringVar(value="local")
+    backend_frame = ttk.Frame(frame)
+    backend_frame.grid(row=3, column=0, columnspan=2, sticky="w")
+    ttk.Radiobutton(
+        backend_frame, text="Cloud AI", variable=backend_var, value="cloud",
+    ).pack(side="left", padx=(0, 12))
+    ttk.Radiobutton(
+        backend_frame, text="Local AI (Ollama)", variable=backend_var,
+        value="local",
+    ).pack(side="left")
+    return backend_var
+
+
+def _create_cloud_provider_row(frame: ttk.Frame) -> ttk.Combobox:
+    """Create cloud provider dropdown. Returns the Combobox widget."""
+    ttk.Label(frame, text="Cloud Provider:").grid(
+        row=4, column=0, sticky="w", pady=(8, 4),
+    )
+    providers = [CLOUD_PROVIDERS[p]["name"] for p in
+                 ("openai", "openrouter", "groq", "custom")]
+    combo = ttk.Combobox(
+        frame, values=providers, state="readonly", width=37,
+    )
+    combo.set(providers[0])
+    combo.grid(row=5, column=0, columnspan=2, sticky="ew")
+    return combo
+
+
+def _create_cloud_model_row(frame: ttk.Frame) -> ttk.Combobox:
+    """Create cloud model dropdown. Returns the Combobox widget."""
+    ttk.Label(frame, text="Cloud Model:").grid(
+        row=6, column=0, sticky="w", pady=(8, 4),
+    )
+    combo = ttk.Combobox(frame, state="readonly", width=37)
+    combo.grid(row=7, column=0, columnspan=2, sticky="ew")
+    return combo
+
+
+def _create_api_key_label(frame: ttk.Frame) -> ttk.Label:
+    """Create the API key status label."""
+    label = ttk.Label(frame, text="", foreground="gray")
+    label.grid(row=8, column=0, columnspan=2, sticky="w", pady=(4, 0))
+    return label
+
+
 def _create_model_row(
     frame: ttk.Frame, root: tk.Tk,
 ) -> tk.StringVar:
-    """Create the model-dropdown row and return the StringVar."""
+    """Create the local model-dropdown row and return the StringVar."""
     ttk.Label(frame, text="Model:").grid(
-        row=2, column=0, sticky="w", pady=(12, 4),
+        row=9, column=0, sticky="w", pady=(12, 4),
     )
     model_var = tk.StringVar(value="Checking...")
     combo = ttk.Combobox(
         frame, textvariable=model_var, values=["Checking..."],
         state="readonly", width=37,
     )
-    combo.grid(row=3, column=0, columnspan=2, sticky="ew")
+    combo.grid(row=10, column=0, columnspan=2, sticky="ew")
 
     def _bg_fetch() -> None:
         try:
@@ -77,11 +129,11 @@ def _create_model_row(
 def _create_mode_row(frame: ttk.Frame) -> tk.StringVar:
     """Create the mode-selector row and return the StringVar."""
     ttk.Label(frame, text="Mode:").grid(
-        row=4, column=0, sticky="w", pady=(12, 4),
+        row=11, column=0, sticky="w", pady=(12, 4),
     )
     mode_var = tk.StringVar(value="interactive")
     modes_frame = ttk.Frame(frame)
-    modes_frame.grid(row=5, column=0, columnspan=2, sticky="w")
+    modes_frame.grid(row=12, column=0, columnspan=2, sticky="w")
     for text, value in [("Interactive", "interactive"),
                         ("Full export", "full"),
                         ("Text tree", "text")]:
@@ -91,12 +143,18 @@ def _create_mode_row(frame: ttk.Frame) -> tk.StringVar:
     return mode_var
 
 
-def _create_go_button(
+_PROVIDER_KEYS = ["openai", "openrouter", "groq", "custom"]
+
+
+def _create_go_button(  # pylint: disable=too-many-arguments,too-many-positional-arguments  # noqa: E501
     frame: ttk.Frame,
     root: tk.Tk,
     folder_var: tk.StringVar,
     model_var: tk.StringVar,
     mode_var: tk.StringVar,
+    backend_var: tk.StringVar,
+    cloud_provider_combo: ttk.Combobox,
+    cloud_model_combo: ttk.Combobox,
 ) -> None:
     """Create the Go button with its launch logic."""
     def _go() -> None:
@@ -106,13 +164,26 @@ def _create_go_button(
 
         cmd = [sys.executable, "-m", "codedocent", folder]
 
-        selected_model = model_var.get()
-        if selected_model == "Checking...":
-            return
-        if selected_model == "No AI":
-            cmd.append("--no-ai")
+        if backend_var.get() == "cloud":
+            provider_name = cloud_provider_combo.get()
+            # Reverse-lookup provider key
+            provider_key = "openai"
+            for key in _PROVIDER_KEYS:
+                if CLOUD_PROVIDERS[key]["name"] == provider_name:
+                    provider_key = key
+                    break
+            cloud_model = cloud_model_combo.get()
+            cmd.extend(["--cloud", provider_key])
+            if cloud_model:
+                cmd.extend(["--model", cloud_model])
         else:
-            cmd.extend(["--model", selected_model])
+            selected_model = model_var.get()
+            if selected_model == "Checking...":
+                return
+            if selected_model == "No AI":
+                cmd.append("--no-ai")
+            else:
+                cmd.extend(["--model", selected_model])
 
         mode = mode_var.get()
         if mode == "full":
@@ -124,7 +195,7 @@ def _create_go_button(
         root.destroy()
 
     ttk.Button(frame, text="Go", command=_go).grid(
-        row=6, column=0, columnspan=2, pady=(16, 0),
+        row=13, column=0, columnspan=2, pady=(16, 0),
     )
 
 
@@ -138,9 +209,74 @@ def _build_gui() -> None:
     frame.grid(row=0, column=0, sticky="nsew")
 
     folder_var = _create_folder_row(frame)
+    backend_var = _create_backend_row(frame)
+    cloud_provider_combo = _create_cloud_provider_row(frame)
+    cloud_model_combo = _create_cloud_model_row(frame)
+    api_key_label = _create_api_key_label(frame)
     model_var = _create_model_row(frame, root)
     mode_var = _create_mode_row(frame)
-    _create_go_button(frame, root, folder_var, model_var, mode_var)
+
+    # Cloud widgets to show/hide
+    cloud_widgets = [
+        frame.grid_slaves(row=4)[0],  # provider label
+        cloud_provider_combo,
+        frame.grid_slaves(row=6)[0],  # model label
+        cloud_model_combo,
+        api_key_label,
+    ]
+    # Local widgets to show/hide
+    local_widgets = [
+        frame.grid_slaves(row=9)[0],   # model label
+        frame.grid_slaves(row=10)[0],   # model combo
+    ]
+
+    def _update_visibility(*_args: object) -> None:
+        if backend_var.get() == "cloud":
+            for w in cloud_widgets:
+                w.grid()
+            for w in local_widgets:
+                w.grid_remove()
+        else:
+            for w in cloud_widgets:
+                w.grid_remove()
+            for w in local_widgets:
+                w.grid()
+
+    def _update_cloud_models(*_args: object) -> None:
+        provider_name = cloud_provider_combo.get()
+        for key in _PROVIDER_KEYS:
+            if CLOUD_PROVIDERS[key]["name"] == provider_name:
+                models = CLOUD_PROVIDERS[key]["models"]
+                cloud_model_combo["values"] = models
+                if models:
+                    cloud_model_combo.set(models[0])
+                else:
+                    cloud_model_combo.set("")
+                # Update API key status
+                env_var = CLOUD_PROVIDERS[key]["env_var"]
+                if os.environ.get(env_var):
+                    api_key_label.config(
+                        text=f"API key found in ${env_var}",
+                        foreground="green",
+                    )
+                else:
+                    api_key_label.config(
+                        text=f"Set ${env_var} in your terminal",
+                        foreground="red",
+                    )
+                break
+
+    backend_var.trace_add("write", _update_visibility)
+    cloud_provider_combo.bind("<<ComboboxSelected>>", _update_cloud_models)
+
+    # Initial state
+    _update_cloud_models()
+    _update_visibility()
+
+    _create_go_button(
+        frame, root, folder_var, model_var, mode_var,
+        backend_var, cloud_provider_combo, cloud_model_combo,
+    )
 
     root.mainloop()
 

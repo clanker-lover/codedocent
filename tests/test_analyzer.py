@@ -582,3 +582,122 @@ def test_replace_accepts_file_node(tmp_path):
     assert status == 200
     assert result["success"] is True
     assert target.read_text(encoding="utf-8") == replacement
+
+
+# ---------------------------------------------------------------------------
+# Cloud AI backend routing
+# ---------------------------------------------------------------------------
+
+_CLOUD_CONFIG = {
+    "backend": "cloud",
+    "provider": "openai",
+    "endpoint": "https://api.example.com/v1/chat/completions",
+    "api_key": "test-key-not-real",
+    "model": "gpt-test",
+}
+
+
+@patch("codedocent.cloud_ai.urllib.request.urlopen")
+def test_analyze_routes_to_cloud(mock_urlopen, tmp_path):
+    """When ai_config backend is 'cloud', cloud_chat is called, not ollama."""
+    from codedocent.analyzer import analyze
+
+    resp_body = json.dumps({
+        "choices": [{"message": {"content":
+            "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+        }}],
+    }).encode()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = resp_body
+    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_resp
+
+    node = _make_func_node(
+        source="def add(a, b):\n    result = a + b\n    return result\n",
+    )
+    node.filepath = str(tmp_path / "test.py")
+    root = _make_dir_node(
+        name="proj", children=[node], filepath=str(tmp_path),
+    )
+
+    with patch("codedocent.analyzer.ollama") as mock_ollama:
+        analyze(root, model="gpt-test", ai_config=_CLOUD_CONFIG)
+        mock_ollama.chat.assert_not_called()
+
+    assert mock_urlopen.called
+    assert node.summary is not None
+
+
+@patch("codedocent.cloud_ai.urllib.request.urlopen")
+def test_analyze_single_node_cloud(mock_urlopen, tmp_path):
+    """analyze_single_node with cloud config calls cloud_chat."""
+    from codedocent.analyzer import analyze_single_node
+
+    resp_body = json.dumps({
+        "choices": [{"message": {"content":
+            "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+        }}],
+    }).encode()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = resp_body
+    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_resp
+
+    node = _make_func_node(
+        source="def add(a, b):\n    result = a + b\n    return result\n",
+    )
+    node.filepath = str(tmp_path / "test.py")
+
+    analyze_single_node(
+        node, "gpt-test", str(tmp_path), ai_config=_CLOUD_CONFIG,
+    )
+    assert mock_urlopen.called
+    assert node.summary is not None
+    assert "Adds numbers" in node.summary
+
+
+def test_cache_model_id_cloud():
+    """Cloud config produces composite cache model key."""
+    from codedocent.analyzer import _cache_model_id
+
+    model_id = _cache_model_id("gpt-test", ai_config=_CLOUD_CONFIG)
+    assert model_id == "cloud:openai:gpt-test"
+
+
+def test_cache_model_id_ollama():
+    """Ollama config returns model name as-is."""
+    from codedocent.analyzer import _cache_model_id
+
+    model_id = _cache_model_id("qwen3:14b")
+    assert model_id == "qwen3:14b"
+
+    model_id2 = _cache_model_id(
+        "qwen3:14b", ai_config={"backend": "ollama", "model": "qwen3:14b"},
+    )
+    assert model_id2 == "qwen3:14b"
+
+
+@patch("codedocent.analyzer.ollama")
+def test_ollama_still_works_with_none_ai_config(mock_ollama, tmp_path):
+    """Existing ollama tests still work when ai_config is None."""
+    from codedocent.analyzer import analyze
+
+    mock_response = MagicMock()
+    mock_response.message.content = (
+        "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+    )
+    mock_ollama.chat.return_value = mock_response
+
+    node = _make_func_node(
+        source="def add(a, b):\n    result = a + b\n    return result\n",
+    )
+    node.filepath = str(tmp_path / "test.py")
+    root = _make_dir_node(
+        name="proj", children=[node], filepath=str(tmp_path),
+    )
+
+    analyze(root, model="test-model", ai_config=None)
+    mock_ollama.chat.assert_called_once()
+    assert node.summary is not None

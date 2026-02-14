@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 from unittest.mock import patch, MagicMock
 
-from codedocent.cli import _check_ollama, _fetch_ollama_models, _run_wizard
+import pytest
+
+from codedocent.cli import (
+    _check_ollama,
+    _fetch_ollama_models,
+    _run_wizard,
+    _build_arg_parser,
+    _build_ai_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +67,7 @@ def test_fetch_ollama_models_returns_empty_on_error():
 
 
 # ---------------------------------------------------------------------------
-# _run_wizard tests
+# _run_wizard tests (Local AI path — backend choice "2")
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +76,8 @@ def test_wizard_produces_config(tmp_path):
     folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([folder, "1", "1"])
+    # folder, backend=Local(2), model=1, mode=interactive(1)
+    inputs = iter([folder, "2", "1", "1"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -89,7 +100,7 @@ def test_wizard_tilde_expansion(tmp_path):
     """Input with ~ gets expanded."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([str(tmp_path), "1", "1"])
+    inputs = iter([str(tmp_path), "2", "1", "1"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -109,7 +120,7 @@ def test_wizard_invalid_folder_reprompts(tmp_path):
     valid_folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter(["/nonexistent_xyz_path_42", valid_folder, "1", "1"])
+    inputs = iter(["/nonexistent_xyz_path_42", valid_folder, "2", "1", "1"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -129,7 +140,8 @@ def test_wizard_ollama_not_running(tmp_path):
     folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([folder, "y", "1"])
+    # folder, backend=Local(2), ollama not found -> "y" no-ai, mode=1
+    inputs = iter([folder, "2", "y", "1"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -145,7 +157,8 @@ def test_wizard_default_choices(tmp_path):
     folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([folder, "", ""])
+    # folder, backend=default(Enter->Local), model=default, mode=default
+    inputs = iter([folder, "", "", ""])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -167,7 +180,7 @@ def test_wizard_text_mode(tmp_path):
     folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([folder, "1", "3"])
+    inputs = iter([folder, "2", "1", "3"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -188,7 +201,7 @@ def test_wizard_full_mode(tmp_path):
     folder = str(tmp_path)
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
 
-    inputs = iter([folder, "1", "2"])
+    inputs = iter([folder, "2", "1", "2"])
 
     with (
         patch("builtins.input", side_effect=inputs),
@@ -202,3 +215,151 @@ def test_wizard_full_mode(tmp_path):
 
     assert result.full is True
     assert result.text is False
+
+
+# ---------------------------------------------------------------------------
+# _run_wizard cloud path tests
+# ---------------------------------------------------------------------------
+
+
+def _make_cloud_response():
+    """Build mock urlopen response for cloud validation."""
+    body = json.dumps({
+        "choices": [{"message": {"content": "Hello"}}],
+    }).encode()
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_wizard_cloud_path(tmp_path):
+    """Wizard cloud path sets ai_config on result."""
+    folder = str(tmp_path)
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+
+    # folder, backend=Cloud(1), provider=OpenAI(1), model=1, mode=1
+    inputs = iter([folder, "1", "1", "1", "1"])
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"}),
+        patch(
+            "codedocent.cloud_ai.urllib.request.urlopen",
+            return_value=_make_cloud_response(),
+        ),
+    ):
+        result = _run_wizard()
+
+    assert result.ai_config is not None
+    assert result.ai_config["backend"] == "cloud"
+    assert result.ai_config["provider"] == "openai"
+    assert result.no_ai is False
+
+
+def test_wizard_no_ai_path(tmp_path):
+    """Wizard no-AI path sets no_ai=True."""
+    folder = str(tmp_path)
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+
+    # folder, backend=No AI(3), mode=1
+    inputs = iter([folder, "3", "1"])
+
+    with patch("builtins.input", side_effect=inputs):
+        result = _run_wizard()
+
+    assert result.no_ai is True
+    assert result.ai_config is None
+
+
+# ---------------------------------------------------------------------------
+# CLI argument parsing: --cloud
+# ---------------------------------------------------------------------------
+
+
+def test_parse_cloud_openai():
+    """--cloud openai is parsed correctly."""
+    parser = _build_arg_parser()
+    args = parser.parse_args(["/some/path", "--cloud", "openai"])
+    assert args.cloud == "openai"
+
+
+def test_parse_cloud_custom():
+    """--cloud custom with --endpoint is parsed correctly."""
+    parser = _build_arg_parser()
+    args = parser.parse_args([
+        "/some/path", "--cloud", "custom",
+        "--endpoint", "https://my.api/v1/chat/completions",
+    ])
+    assert args.cloud == "custom"
+    assert args.endpoint == "https://my.api/v1/chat/completions"
+
+
+def test_parse_api_key_env():
+    """--api-key-env is parsed correctly."""
+    parser = _build_arg_parser()
+    args = parser.parse_args([
+        "/some/path", "--cloud", "openai", "--api-key-env", "MY_KEY",
+    ])
+    assert args.api_key_env == "MY_KEY"
+
+
+# ---------------------------------------------------------------------------
+# _build_ai_config tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_ai_config_none_without_cloud():
+    """Without --cloud, _build_ai_config returns None."""
+    args = argparse.Namespace(cloud=None)
+    assert _build_ai_config(args) is None
+
+
+def test_build_ai_config_openai():
+    """--cloud openai builds correct config."""
+    args = argparse.Namespace(
+        cloud="openai", endpoint=None, api_key_env=None, model="gpt-4.1-nano",
+    )
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-not-real"}):
+        config = _build_ai_config(args)
+
+    assert config is not None
+    assert config["backend"] == "cloud"
+    assert config["provider"] == "openai"
+    assert config["model"] == "gpt-4.1-nano"
+    assert config["api_key"] == "test-key-not-real"
+
+
+def test_build_ai_config_custom_without_endpoint():
+    """--cloud custom without --endpoint exits with error."""
+    args = argparse.Namespace(
+        cloud="custom", endpoint=None, api_key_env=None, model="test",
+    )
+    with pytest.raises(SystemExit):
+        _build_ai_config(args)
+
+
+def test_build_ai_config_missing_api_key():
+    """Missing API key exits with error."""
+    args = argparse.Namespace(
+        cloud="openai", endpoint=None, api_key_env=None, model="gpt-test",
+    )
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        pytest.raises(SystemExit),
+    ):
+        _build_ai_config(args)
+
+
+def test_build_ai_config_custom_env_var():
+    """--api-key-env overrides the default env var."""
+    args = argparse.Namespace(
+        cloud="openai", endpoint=None, api_key_env="MY_KEY",
+        model="gpt-test",
+    )
+    with patch.dict(os.environ, {"MY_KEY": "test-key-not-real"}):
+        config = _build_ai_config(args)
+
+    assert config is not None
+    assert config["api_key"] == "test-key-not-real"

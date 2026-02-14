@@ -55,3 +55,38 @@ def test_gui_fetch_ollama_models_returns_list():
         side_effect=OSError("fail"),
     ):
         assert _fetch_ollama_models() == []
+
+
+# ---------------------------------------------------------------------------
+# Cloud UI: structural tests (no tkinter required)
+# ---------------------------------------------------------------------------
+
+
+def test_gui_has_backend_row_creator():
+    """_create_backend_row exists and is callable."""
+    from codedocent.gui import _create_backend_row
+
+    assert callable(_create_backend_row)
+
+
+def test_gui_has_cloud_provider_row_creator():
+    """_create_cloud_provider_row exists and is callable."""
+    from codedocent.gui import _create_cloud_provider_row
+
+    assert callable(_create_cloud_provider_row)
+
+
+def test_gui_has_cloud_model_row_creator():
+    """_create_cloud_model_row exists and is callable."""
+    from codedocent.gui import _create_cloud_model_row
+
+    assert callable(_create_cloud_model_row)
+
+
+def test_gui_provider_keys_match_cloud_providers():
+    """_PROVIDER_KEYS matches CLOUD_PROVIDERS dict keys."""
+    from codedocent.gui import _PROVIDER_KEYS
+    from codedocent.cloud_ai import CLOUD_PROVIDERS
+
+    for key in _PROVIDER_KEYS:
+        assert key in CLOUD_PROVIDERS
