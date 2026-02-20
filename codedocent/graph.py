@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import sys
 from dataclasses import dataclass, field
@@ -389,9 +390,11 @@ def get_module_graph(root: CodeNode, project_root: str) -> dict:
                 imp, fnode.filepath, project_files, project_modules_top,
             )
             if resolved is None:
-                # External dependency
+                # External dependency (skip stdlib)
                 if not imp.is_relative:
-                    external_deps.add(imp.module.split(".")[0])
+                    top = imp.module.split(".")[0]
+                    if top not in _get_stdlib_modules():
+                        external_deps.add(top)
                 continue
             if resolved != fnode.filepath:
                 key = (fnode.filepath, resolved)
@@ -583,6 +586,30 @@ def get_file_dependencies(
 
 
 # ---------------------------------------------------------------------------
+# Docstring extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_module_docstring(source: str) -> str:
+    """Extract the module-level docstring from Python source.
+
+    Returns the first line of the docstring, truncated to 80 characters.
+    Returns an empty string if no docstring is found.
+    """
+    try:
+        tree = ast.parse(source)
+        docstring = ast.get_docstring(tree)
+        if docstring:
+            first_line = docstring.split("\n")[0].strip()
+            if len(first_line) > 80:
+                return first_line[:77] + "..."
+            return first_line
+    except SyntaxError:
+        pass
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Context export
 # ---------------------------------------------------------------------------
 
@@ -637,20 +664,33 @@ def export_module_md(
     if graph is None:
         return None
 
+    # Build filepath -> docstring lookup for Purpose column
+    docstrings: dict[str, str] = {}
+    for node in graph["nodes"]:
+        if node["node_type"] == "external":
+            continue
+        fnode = _find_file_node(root, node["id"])
+        if fnode and fnode.source and fnode.language == "python":
+            docstrings[node["id"]] = _extract_module_docstring(fnode.source)
+
     mod_name = os.path.basename(module_path)
     lines = [f"# Module: {mod_name}\n"]
 
     # Files table
     lines.append("## Files\n")
-    lines.append("| File | Lines | Quality |")
-    lines.append("|------|-------|---------|")
+    lines.append("| File | Lines | Quality | Purpose |")
+    lines.append("|------|-------|---------|---------|")
     for node in graph["nodes"]:
         if node["node_type"] == "external":
             continue
         quality_label = {"clean": "OK", "complex": "Complex", "warning": "Warning"}.get(
             node["quality"], "OK"
         )
-        lines.append(f"| {node['name']} | {node['line_count']} | {quality_label} |")
+        purpose = docstrings.get(node["id"], "") or "\u2014"
+        lines.append(
+            f"| {node['name']} | {node['line_count']} "
+            f"| {quality_label} | {purpose} |"
+        )
 
     # Internal dependencies
     internal_edges = [

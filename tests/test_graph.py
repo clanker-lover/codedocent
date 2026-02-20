@@ -9,6 +9,7 @@ import pytest
 from codedocent.graph import (
     ImportInfo,
     _extract_full_imports,
+    _extract_module_docstring,
     _resolve_import,
     _find_modules,
     _aggregate_quality,
@@ -408,6 +409,14 @@ class TestGetModuleGraph:
         graph = get_module_graph(root, "/tmp/project")
         assert "pytest" in graph["external"]
 
+    def test_stdlib_excluded_from_external_deps(self):
+        """Stdlib modules should not appear in external dependencies."""
+        root = _make_multi_module_tree()
+        graph = get_module_graph(root, "/tmp/project")
+        stdlib_names = {"os", "sys", "json", "pathlib", "collections", "re"}
+        for dep in graph["external"]:
+            assert dep not in stdlib_names, f"stdlib module '{dep}' in external deps"
+
     def test_module_stats(self):
         root = _make_multi_module_tree()
         graph = get_module_graph(root, "/tmp/project")
@@ -486,6 +495,45 @@ class TestGetFileGraph:
 
 
 # ---------------------------------------------------------------------------
+# Docstring extraction tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractModuleDocstring:
+    """Tests for _extract_module_docstring."""
+
+    def test_extracts_triple_double_quote_docstring(self):
+        source = '"""Parse source files into a tree."""\nimport os\n'
+        assert _extract_module_docstring(source) == "Parse source files into a tree."
+
+    def test_extracts_triple_single_quote_docstring(self):
+        source = "'''Helper utilities for scanning.'''\nimport sys\n"
+        assert _extract_module_docstring(source) == "Helper utilities for scanning."
+
+    def test_returns_empty_for_no_docstring(self):
+        source = "import os\nx = 1\n"
+        assert _extract_module_docstring(source) == ""
+
+    def test_returns_first_line_of_multiline(self):
+        source = '"""First line.\n\nMore detail here.\n"""\nimport os\n'
+        assert _extract_module_docstring(source) == "First line."
+
+    def test_truncates_long_docstring(self):
+        long_text = "A" * 100
+        source = f'"""{long_text}"""\n'
+        result = _extract_module_docstring(source)
+        assert len(result) <= 80
+        assert result.endswith("...")
+
+    def test_returns_empty_for_syntax_error(self):
+        source = "def foo(:\n"
+        assert _extract_module_docstring(source) == ""
+
+    def test_returns_empty_for_empty_source(self):
+        assert _extract_module_docstring("") == ""
+
+
+# ---------------------------------------------------------------------------
 # Context export tests
 # ---------------------------------------------------------------------------
 
@@ -511,6 +559,16 @@ class TestExportArchitectureMd:
         md = export_architecture_md(root, "/tmp/project")
         assert "pytest" in md
 
+    def test_excludes_stdlib_from_external_deps(self):
+        """Stdlib modules like os, sys should not appear in External Dependencies."""
+        root = _make_multi_module_tree()
+        md = export_architecture_md(root, "/tmp/project")
+        # The test tree includes files that import os/sys but those are stdlib
+        for line in md.splitlines():
+            if line.startswith("- "):
+                dep = line[2:].strip()
+                assert dep not in ("os", "sys", "json", "pathlib")
+
 
 class TestExportModuleMd:
     """Tests for export_module_md."""
@@ -521,6 +579,12 @@ class TestExportModuleMd:
         assert md is not None
         assert "# Module: codedocent" in md
         assert "## Files" in md
+
+    def test_contains_purpose_column(self):
+        root = _make_multi_module_tree()
+        md = export_module_md(root, "/tmp/project", "codedocent")
+        assert md is not None
+        assert "| File | Lines | Quality | Purpose |" in md
 
     def test_returns_none_for_invalid_module(self):
         root = _make_multi_module_tree()
@@ -533,6 +597,42 @@ class TestExportModuleMd:
         assert md is not None
         assert "parser.py" in md
         assert "server.py" in md
+
+    def test_shows_docstring_in_purpose(self):
+        """Files with module docstrings should show them in the Purpose column."""
+        init_node = _make_file_node(
+            name="__init__.py",
+            filepath="mypkg/__init__.py",
+            source='"""My package init."""\n',
+            node_id="init",
+        )
+        core_node = _make_file_node(
+            name="core.py",
+            filepath="mypkg/core.py",
+            source='"""Core business logic for the app."""\nimport os\nx = 1\n',
+            node_id="core",
+        )
+        nodc_node = _make_file_node(
+            name="utils.py",
+            filepath="mypkg/utils.py",
+            source="import os\nx = 1\n",
+            node_id="utils",
+        )
+        dir_node = _make_dir_node(
+            name="mypkg",
+            children=[init_node, core_node, nodc_node],
+            filepath="/tmp/project/mypkg",
+        )
+        root = _make_dir_node(
+            name="project",
+            children=[dir_node],
+            filepath="/tmp/project",
+        )
+        md = export_module_md(root, "/tmp/project", "mypkg")
+        assert md is not None
+        assert "Core business logic for the app" in md
+        # utils.py has no docstring -> em dash
+        assert "\u2014" in md
 
 
 # ---------------------------------------------------------------------------
