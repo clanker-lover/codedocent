@@ -16,11 +16,12 @@ Codedocent parses the codebase into a navigable, visual block structure and expl
 
 ![Architecture mode — dependency graph showing files as nodes with directed edges](https://raw.githubusercontent.com/clanker-lover/codedocent/main/docs/screenshots/architecture-mode.png)
 
-Visualize your codebase as a zoomable dependency graph. Three levels of detail:
+Visualize your codebase as a zoomable dependency graph. Four levels of detail:
 
-- **Level 0 — Modules**: See all modules as nodes with dependency edges between them
-- **Level 1 — Files**: Drill into a module to see its files and their internal + external dependencies
-- **Level 2 — Code**: Click through to the existing CodeDocent file view (functions, classes, complexity)
+- **Level 0 — Architecture**: See the full codebase as a dependency graph — all modules as nodes with edges between them
+- **Level 1 — Modules**: Drill into a module to see its files and their internal + external dependencies
+- **Level 2 — Files**: Click through to the existing CodeDocent file view (functions, classes, complexity)
+- **Level 3 — Code**: Inspect individual functions, classes, methods, and their summaries
 
 Export MD button at each level generates structured context you can feed to AI tools.
 
