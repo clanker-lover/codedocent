@@ -136,7 +136,8 @@ def _create_mode_row(frame: ttk.Frame) -> tk.StringVar:
     modes_frame.grid(row=12, column=0, columnspan=2, sticky="w")
     for text, value in [("Interactive", "interactive"),
                         ("Full export", "full"),
-                        ("Text tree", "text")]:
+                        ("Text tree", "text"),
+                        ("Architecture", "arch")]:
         ttk.Radiobutton(
             modes_frame, text=text, variable=mode_var, value=value,
         ).pack(anchor="w")
@@ -190,6 +191,8 @@ def _create_go_button(  # pylint: disable=too-many-arguments,too-many-positional
             cmd.append("--full")
         elif mode == "text":
             cmd.append("--text")
+        elif mode == "arch":
+            cmd.append("--arch")
 
         subprocess.Popen(cmd)  # pylint: disable=consider-using-with  # nosec B603  # noqa: E501
         root.destroy()
