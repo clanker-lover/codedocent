@@ -79,3 +79,16 @@ def render_interactive(  # nosec B107
     template = env.get_template("interactive.html")
     tree_json = json.dumps(_node_to_dict(root)).replace("</", r"<\/")
     return template.render(tree_json=tree_json, csrf_token=csrf_token)
+
+
+def render_architecture(  # nosec B107
+    root: CodeNode, csrf_token: str = "",
+) -> str:
+    """Render the architecture graph HTML page."""
+    template_dir = Path(__file__).parent / "templates"
+    env = Environment(
+        loader=FileSystemLoader(str(template_dir)),
+        autoescape=True,
+    )
+    template = env.get_template("architecture.html")
+    return template.render(csrf_token=csrf_token, project_name=root.name)

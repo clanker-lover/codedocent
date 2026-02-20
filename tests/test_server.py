@@ -630,3 +630,76 @@ def test_old_cache_entry_removed_after_replace(tmp_path):
     # Verify the old entry is gone
     updated_cache = _load_cache(cache_path)
     assert old_key not in updated_cache.get("entries", {})
+
+
+# ---------------------------------------------------------------------------
+# Architecture graph endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_root_with_query_string_returns_html(server_fixture):
+    """GET /?node=<id> returns 200 (not 404) — query string routing."""
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/?node=abc123def456")
+    resp = conn.getresponse()
+    assert resp.status == 200
+    body = resp.read().decode()
+    assert "<!DOCTYPE html>" in body
+    conn.close()
+
+
+def test_get_arch_returns_html(server_fixture):
+    """GET /arch returns 200 with HTML containing D3 script tag."""
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/arch")
+    resp = conn.getresponse()
+    assert resp.status == 200
+    body = resp.read().decode()
+    assert "<!DOCTYPE html>" in body
+    assert "d3" in body.lower() or "cdInit" in body
+    conn.close()
+
+
+def test_get_graph_architecture_returns_json(server_fixture):
+    """GET /api/graph/architecture returns valid JSON with expected keys."""
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/api/graph/architecture", headers=_post_headers())
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read())
+    assert "nodes" in data
+    assert "edges" in data
+    assert "external" in data
+    conn.close()
+
+
+def test_get_graph_module_invalid_returns_404(server_fixture):
+    """GET /api/graph/module/<invalid> returns 404."""
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "GET", "/api/graph/module/nonexistent_module",
+        headers=_post_headers(),
+    )
+    resp = conn.getresponse()
+    assert resp.status == 404
+    conn.close()
+
+
+def test_get_graph_export_architecture_returns_markdown(server_fixture):
+    """GET /api/graph/export/architecture returns JSON with markdown key."""
+    port, _, _ = server_fixture
+    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "GET", "/api/graph/export/architecture",
+        headers=_post_headers(),
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read())
+    assert "markdown" in data
+    assert "# Architecture Overview" in data["markdown"]
+    conn.close()

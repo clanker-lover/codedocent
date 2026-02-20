@@ -28,6 +28,7 @@ class CodeNode:  # pylint: disable=too-many-instance-attributes
     # Filled in by analyzer later:
     summary: str | None = None
     pseudocode: str | None = None
+    key_concepts: str | None = None
     quality: str | None = None  # 'clean' | 'complex' | 'warning'
     warnings: list[str] | None = None
     node_id: str | None = None

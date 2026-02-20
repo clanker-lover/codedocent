@@ -363,3 +363,37 @@ def test_build_ai_config_custom_env_var():
 
     assert config is not None
     assert config["api_key"].reveal() == "test-key-not-real"
+
+
+# ---------------------------------------------------------------------------
+# Architecture mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_arch_flag():
+    """--arch flag is parsed correctly."""
+    parser = _build_arg_parser()
+    args = parser.parse_args(["/some/path", "--arch"])
+    assert args.arch is True
+
+
+def test_parse_arch_flag_default():
+    """--arch flag defaults to False."""
+    parser = _build_arg_parser()
+    args = parser.parse_args(["/some/path"])
+    assert args.arch is False
+
+
+def test_wizard_arch_mode(tmp_path):
+    """Choosing mode 4 sets arch=True."""
+    folder = str(tmp_path)
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+
+    inputs = iter([folder, "3", "4"])
+
+    with patch("builtins.input", side_effect=inputs):
+        result = _run_wizard()
+
+    assert result.arch is True
+    assert result.text is False
+    assert result.full is False

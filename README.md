@@ -1,6 +1,6 @@
 # codedocent
 
-<img width="1658" height="2158" alt="Screenshot_2026-02-09_13-17-06" src="https://github.com/user-attachments/assets/ff097ead-69ec-4618-b7b7-2b99c60ac57e" />
+<!-- Screenshot coming soon -->
 
 **Code visualization for non-programmers.**
 
@@ -11,6 +11,33 @@ A docent is a guide who explains things to people who aren't experts. Codedocent
 You're staring at a codebase you didn't write — maybe thousands of files across dozens of directories — and you need to understand what it does. Reading every file isn't realistic. You need a way to visualize the code structure, get a high-level map of what's where, and drill into the parts that matter without losing context.
 
 Codedocent parses the codebase into a navigable, visual block structure and explains each piece in plain English. It's an AI code analysis tool — use a cloud provider for speed or run locally through Ollama for full privacy. Point it at any codebase and get a structural overview you can explore interactively, understand quickly, and share as a static HTML file.
+
+## What's new in v1.0.0
+
+### Architecture Mode
+
+Visualize your codebase as a zoomable dependency graph. Three levels of detail:
+
+- **Level 0 — Modules**: See all modules as nodes with dependency edges between them
+- **Level 1 — Files**: Drill into a module to see its files and their internal + external dependencies
+- **Level 2 — Code**: Click through to the existing CodeDocent file view (functions, classes, complexity)
+
+Export MD button at each level generates structured context you can feed to AI tools.
+
+```bash
+codedocent /path/to/code --arch    # jump straight to architecture view
+```
+
+Or choose option 4 in the setup wizard.
+
+### Enhanced AI Summaries
+
+AI analysis now understands where each file sits in the system:
+
+- **Dependency context** — the prompt tells the AI what this file imports and what imports it
+- **ROLE** — what job does this code do? Foundation, orchestrator, utility, entry point?
+- **KEY CONCEPTS** — main functions, classes, and data structures with one-line descriptions
+- **Better prompts** — explains code in terms of data flow and system role, not just syntax
 
 ## Who this is for
 
@@ -23,7 +50,9 @@ Codedocent parses the codebase into a navigable, visual block structure and expl
 
 ## What you see
 
-Nested, color-coded blocks representing directories, files, classes, and functions — the entire structure of a codebase laid out visually. Each block shows a plain English summary, a pseudocode translation, and quality warnings (green/yellow/red). Click any block to drill down; breadcrumbs navigate you back up. You can export code from any block or paste replacement code back into the source file. AI explanations come from your choice of cloud provider or local Ollama.
+Nested, color-coded blocks representing directories, files, classes, and functions — the entire structure of a codebase laid out visually. Each block shows a plain English summary, key concepts, pseudocode, and quality warnings. Click any block to drill down; breadcrumbs navigate you back up. You can export code from any block or paste replacement code back into the source file.
+
+In architecture mode, a D3.js force-directed graph shows modules and files as nodes with directed dependency edges. Click any node to drill deeper.
 
 ## Install
 
@@ -38,6 +67,7 @@ Requires Python 3.10+. Cloud AI needs an API key set in an env var (e.g. `OPENAI
 ```bash
 codedocent                         # setup wizard — walks you through everything
 codedocent /path/to/code           # interactive mode (recommended)
+codedocent /path/to/code --arch    # architecture mode — dependency graph
 codedocent /path/to/code --full    # full analysis, static HTML output
 codedocent --gui                   # graphical launcher
 codedocent /path/to/code --cloud openai    # use OpenAI
@@ -47,7 +77,7 @@ codedocent /path/to/code --cloud custom --endpoint https://my-llm/v1/chat/comple
 
 ## How it works
 
-Parses code structure with tree-sitter, scores quality with static analysis, and sends individual blocks to a cloud AI provider or local Ollama model for plain English summaries and pseudocode. Interactive mode analyzes on click — typically 1-2 seconds per block. Full mode analyzes everything upfront into a self-contained HTML file you can share.
+Parses code structure with tree-sitter, scores quality with static analysis, and sends individual blocks to a cloud AI provider or local Ollama model for plain English summaries and pseudocode. Interactive mode analyzes on click — typically 1-2 seconds per block. Full mode analyzes everything upfront into a self-contained HTML file you can share. Architecture mode builds a dependency graph from import statements and renders it as a zoomable D3 visualization.
 
 ## AI options
 

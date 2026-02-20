@@ -44,6 +44,7 @@ def _node_to_dict(node: CodeNode, include_source: bool = False) -> dict:
         "imports": node.imports,
         "summary": node.summary,
         "pseudocode": node.pseudocode,
+        "key_concepts": node.key_concepts,
         "quality": node.quality,
         "warnings": node.warnings,
         "color": (
@@ -93,6 +94,7 @@ def _update_node_after_replace(
     # Clear cached analysis
     node.summary = None
     node.pseudocode = None
+    node.key_concepts = None
     node.quality = None
     node.warnings = None
 
@@ -148,6 +150,21 @@ def _start_idle_watcher(
     watcher.start()
 
 
+def _get_node_deps(node: CodeNode) -> dict[str, list[str]] | None:
+    """Compute dependency context for a node's file."""
+    filepath = node.filepath
+    if not filepath or _Handler.root is None:
+        return None
+    try:
+        from codedocent.graph import get_file_dependencies  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+        return get_file_dependencies(
+            _Handler.root, _Handler.cache_dir, filepath,
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
 def _analyze_node(node_id: str) -> dict | None:
     """Look up *node_id* and return an analyzed dict, or None if not found."""
     if node_id not in _Handler.node_lookup:
@@ -159,10 +176,11 @@ def _analyze_node(node_id: str) -> dict | None:
         if node.summary is None:
             from codedocent.analyzer import analyze_single_node  # pylint: disable=import-outside-toplevel  # noqa: E501
 
+            deps = _get_node_deps(node)
             try:
                 analyze_single_node(
                     node, _Handler.model, _Handler.cache_dir,
-                    ai_config=_Handler.ai_config,
+                    ai_config=_Handler.ai_config, deps=deps,
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 print(
@@ -256,6 +274,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     # Class-level shared state, set by start_server() before serving
     html_content: str = ""
+    arch_html_content: str = ""
     csrf_token: str = ""
     root: CodeNode | None = None
     node_lookup: dict[str, CodeNode] = {}
@@ -286,20 +305,34 @@ class _Handler(BaseHTTPRequestHandler):
         self._touch()
         if not self._check_host():
             return
-        if self.path == "/":
+        # Strip query string for routing (e.g. /?node=abc -> /)
+        route = self.path.split("?", 1)[0]
+        if route == "/":
             self._serve_html()
-        elif self.path.startswith("/api/"):
+        elif route == "/arch":
+            self._serve_arch_html()
+        elif route.startswith("/api/"):
             token = self.headers.get("X-Codedocent-Token", "")
             if token != _Handler.csrf_token:
                 self._send_json(
                     403, {"error": "Invalid or missing CSRF token"},
                 )
                 return
-            if self.path == "/api/tree":
+            if route == "/api/tree":
                 self._serve_tree()
-            elif self.path.startswith("/api/source/"):
-                node_id = self.path[len("/api/source/"):]
+            elif route.startswith("/api/source/"):
+                node_id = route[len("/api/source/"):]
                 self._handle_source(node_id)
+            elif route == "/api/graph/architecture":
+                self._handle_graph_architecture()
+            elif route.startswith("/api/graph/module/"):
+                mod_path = route[len("/api/graph/module/"):]
+                self._handle_graph_module(mod_path)
+            elif route == "/api/graph/export/architecture":
+                self._handle_export_arch()
+            elif route.startswith("/api/graph/export/module/"):
+                mod_path = route[len("/api/graph/export/module/"):]
+                self._handle_export_module(mod_path)
             else:
                 self.send_error(404)
         else:
@@ -344,6 +377,62 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404, "Unknown node ID")
             return
         self._send_json(200, {"source": source})
+
+    def _serve_arch_html(self):
+        if not _Handler.arch_html_content:
+            from codedocent.renderer import render_architecture  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+            _Handler.arch_html_content = render_architecture(
+                _Handler.root, csrf_token=_Handler.csrf_token,
+            )
+        data = _Handler.arch_html_content.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _handle_graph_architecture(self):
+        from codedocent import graph as _g  # noqa: E501  pylint: disable=import-outside-toplevel
+
+        result = _g.get_module_graph(
+            _Handler.root, _Handler.cache_dir,
+        )
+        self._send_json(200, result)
+
+    def _handle_graph_module(self, mod_path: str):
+        from codedocent import graph as _g  # noqa: E501  pylint: disable=import-outside-toplevel
+        from urllib.parse import unquote  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+        mod_path = unquote(mod_path)
+        result = _g.get_file_graph(
+            _Handler.root, _Handler.cache_dir, mod_path,
+        )
+        if result is None:
+            self.send_error(404)
+            return
+        self._send_json(200, result)
+
+    def _handle_export_arch(self):
+        from codedocent import graph as _g  # noqa: E501  pylint: disable=import-outside-toplevel
+
+        md = _g.export_architecture_md(
+            _Handler.root, _Handler.cache_dir,
+        )
+        self._send_json(200, {"markdown": md})
+
+    def _handle_export_module(self, mod_path: str):
+        from codedocent import graph as _g  # noqa: E501  pylint: disable=import-outside-toplevel
+        from urllib.parse import unquote  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+        mod_path = unquote(mod_path)
+        md = _g.export_module_md(
+            _Handler.root, _Handler.cache_dir, mod_path,
+        )
+        if md is None:
+            self.send_error(404)
+            return
+        self._send_json(200, {"markdown": md})
 
     def _handle_analyze(self, node_id: str):
         result = _analyze_node(node_id)
@@ -469,10 +558,12 @@ def start_server(  # pylint: disable=too-many-arguments
     open_browser: bool = True,
     *,
     ai_config: dict | None = None,
+    open_path: str = "/",
 ) -> None:
     """Start the interactive server.
 
     Blocks until shutdown (POST /shutdown, idle timeout, or Ctrl-C).
+    *open_path* controls which page the browser opens (e.g. "/arch").
     """
     if port is None:
         port = _find_open_port()
@@ -493,7 +584,7 @@ def start_server(  # pylint: disable=too-many-arguments
     print("Press Ctrl-C to stop.", flush=True)
 
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(f"{url}{open_path}")
 
     try:
         server.serve_forever()

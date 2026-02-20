@@ -202,10 +202,12 @@ def _run_wizard() -> argparse.Namespace:
     print("  1. Interactive \u2014 browse in browser [default]")
     print("  2. Full export \u2014 analyze everything, save HTML")
     print("  3. Text tree \u2014 plain text in terminal")
+    print("  4. Architecture \u2014 dependency graph visualization")
     mode_choice = _safe_input("Choice [1]: ").strip()
 
     text = mode_choice == "3"
     full = mode_choice == "2"
+    arch = mode_choice == "4"
 
     print()
 
@@ -216,6 +218,7 @@ def _run_wizard() -> argparse.Namespace:
         model=model,
         no_ai=no_ai,
         full=full,
+        arch=arch,
         port=None,
         workers=1,
         gui=False,
@@ -263,6 +266,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workers", type=int, default=1,
         help="Number of parallel AI workers for --full mode (default: 1)",
+    )
+    parser.add_argument(
+        "--arch", action="store_true",
+        help="Architecture mode: dependency graph visualization",
     )
     parser.add_argument(
         "--gui", action="store_true",
@@ -378,6 +385,20 @@ def _run_interactive_mode(
                  ai_config=ai_config)
 
 
+def _run_architecture_mode(
+    tree: CodeNode, model: str, port: int | None,
+    ai_config: dict | None = None,
+) -> None:
+    """Architecture mode: dependency graph visualization."""
+    from codedocent.analyzer import analyze_no_ai, assign_node_ids  # pylint: disable=import-outside-toplevel  # noqa: E501
+    from codedocent.server import start_server  # pylint: disable=import-outside-toplevel  # noqa: E501
+
+    analyze_no_ai(tree)
+    node_lookup = assign_node_ids(tree)
+    start_server(tree, node_lookup, model=model, port=port,
+                 ai_config=ai_config, open_path="/arch")
+
+
 def main() -> None:
     """Entry point for the codedocent CLI."""
     parser = _build_arg_parser()
@@ -405,6 +426,9 @@ def main() -> None:
     elif args.full:
         _run_full_mode(tree, args.model, args.workers, args.output,
                        ai_config=ai_config)
+    elif getattr(args, "arch", False):
+        _run_architecture_mode(tree, args.model, args.port,
+                               ai_config=ai_config)
     else:
         _run_interactive_mode(tree, args.model, args.port,
                               ai_config=ai_config)

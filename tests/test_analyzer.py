@@ -113,6 +113,34 @@ def test_prompt_contains_source_and_language():
     prompt = _build_prompt(node)
     assert "python" in prompt
     assert "def add(a, b):" in prompt
+    assert "ROLE:" in prompt
+    assert "SUMMARY:" in prompt
+    assert "KEY CONCEPTS:" in prompt
+    assert "PSEUDOCODE:" in prompt
+
+
+def test_prompt_includes_dependency_context():
+    from codedocent.analyzer import _build_prompt
+
+    node = _make_func_node()
+    deps = {
+        "imports_from": ["scanner.py"],
+        "imported_by": ["analyzer.py", "graph.py"],
+    }
+    prompt = _build_prompt(node, deps=deps)
+    assert "scanner.py" in prompt
+    assert "analyzer.py" in prompt
+    assert "graph.py" in prompt
+    assert "imports from:" in prompt
+    assert "imported by:" in prompt
+
+
+def test_prompt_without_deps_shows_unknown():
+    from codedocent.analyzer import _build_prompt
+
+    node = _make_func_node()
+    prompt = _build_prompt(node)
+    assert "unknown" in prompt.lower()
 
 
 def test_parse_structured_response():
@@ -124,18 +152,45 @@ def test_parse_structured_response():
         "function add(first_number, second_number):\n"
         "    return first_number + second_number"
     )
-    summary, pseudocode = _parse_ai_response(text)
+    summary, pseudocode, key_concepts = _parse_ai_response(text)
     assert "adds two numbers" in summary
     assert "first_number" in pseudocode
+    assert key_concepts == ""
+
+
+def test_parse_new_format_response():
+    from codedocent.analyzer import _parse_ai_response
+
+    text = (
+        "ROLE: This is a utility module that other parts of the system depend on.\n"
+        "SUMMARY: It takes raw source files and produces structured trees. "
+        "The analyzer and renderer both consume its output.\n"
+        "KEY CONCEPTS:\n"
+        "- CodeNode: The main data structure representing a piece of code\n"
+        "- parse_file: Reads a single file and returns a tree\n"
+        "- parse_directory: Builds the full project tree\n"
+        "PSEUDOCODE:\n"
+        "for each file:\n"
+        "    parse into tree\n"
+        "    attach to directory structure"
+    )
+    summary, pseudocode, key_concepts = _parse_ai_response(text)
+    assert "utility module" in summary
+    assert "structured trees" in summary
+    assert "CodeNode" in key_concepts
+    assert "parse_file" in key_concepts
+    assert "parse_directory" in key_concepts
+    assert "parse into tree" in pseudocode
 
 
 def test_parse_garbage_response():
     from codedocent.analyzer import _parse_ai_response
 
     text = "This is just some random text\nwith multiple lines\nand no markers"
-    summary, pseudocode = _parse_ai_response(text)
+    summary, pseudocode, key_concepts = _parse_ai_response(text)
     assert summary == "This is just some random text"
     assert pseudocode == ""
+    assert key_concepts == ""
 
 
 def test_quality_simple_clean():
@@ -185,7 +240,7 @@ def test_cache_creates_file(mock_ollama, tmp_path):
 
     mock_response = MagicMock()
     mock_response.message.content = (
-        "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+        "ROLE: A utility.\nSUMMARY: Adds numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
     )
     mock_ollama.chat.return_value = mock_response
 
@@ -211,7 +266,7 @@ def test_cache_prevents_duplicate_calls(mock_ollama, tmp_path):
 
     mock_response = MagicMock()
     mock_response.message.content = (
-        "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+        "ROLE: A utility.\nSUMMARY: Adds numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
     )
     mock_ollama.chat.return_value = mock_response
 
@@ -320,7 +375,7 @@ def test_analyze_single_node(mock_ollama, tmp_path):
 
     mock_response = MagicMock()
     mock_response.message.content = (
-        "SUMMARY: Adds two numbers.\nPSEUDOCODE:\nadd a and b"
+        "ROLE: A utility.\nSUMMARY: Adds two numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
     )
     mock_ollama.chat.return_value = mock_response
 
@@ -604,7 +659,7 @@ def test_analyze_routes_to_cloud(mock_urlopen, tmp_path):
 
     resp_body = json.dumps({
         "choices": [{"message": {"content":
-            "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+            "ROLE: A utility.\nSUMMARY: Adds numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
         }}],
     }).encode()
     mock_resp = MagicMock()
@@ -636,7 +691,7 @@ def test_analyze_single_node_cloud(mock_urlopen, tmp_path):
 
     resp_body = json.dumps({
         "choices": [{"message": {"content":
-            "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+            "ROLE: A utility.\nSUMMARY: Adds numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
         }}],
     }).encode()
     mock_resp = MagicMock()
@@ -686,7 +741,7 @@ def test_ollama_still_works_with_none_ai_config(mock_ollama, tmp_path):
 
     mock_response = MagicMock()
     mock_response.message.content = (
-        "SUMMARY: Adds numbers.\nPSEUDOCODE:\nadd a and b"
+        "ROLE: A utility.\nSUMMARY: Adds numbers.\nKEY CONCEPTS:\n- add: adds\nPSEUDOCODE:\nadd a and b"
     )
     mock_ollama.chat.return_value = mock_response
 

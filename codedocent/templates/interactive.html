@@ -16,6 +16,7 @@ if (localStorage.getItem('cd-theme') === 'light')
     --bg-node: #222240;
     --bg-imports: #1e1e38;
     --bg-pseudocode: #1e2a38;
+    --bg-keyconcepts: #1e2a38;
     --bg-source: #0d0d1a;
     --bg-badge: #2e2e50;
     --bg-btn: #2e2e50;
@@ -37,6 +38,8 @@ if (localStorage.getItem('cd-theme') === 'light')
     --text-placeholder: #666688;
     --text-pseudocode-label: #8888aa;
     --text-pseudocode: #ccccdd;
+    --text-keyconcepts-label: #8888aa;
+    --text-keyconcepts: #ccccdd;
     --text-btn: #bbbbcc;
     --text-link: #7799ee;
     --text-toggle: #8888aa;
@@ -48,6 +51,7 @@ if (localStorage.getItem('cd-theme') === 'light')
     --border-node: #3a3a5a;
     --border-imports: #3a3a5a;
     --border-pseudocode: #3a4a5a;
+    --border-keyconcepts: #3a4a5a;
     --border-btn: #4a4a6a;
     --border-breadcrumb: #3a3a5a;
     --border-textarea: #555;
@@ -61,6 +65,7 @@ if (localStorage.getItem('cd-theme') === 'light')
     --bg-node: #FFFFFF;
     --bg-imports: #F9F9F9;
     --bg-pseudocode: #F0F4F8;
+    --bg-keyconcepts: #F0F4F8;
     --bg-source: #1E1E2E;
     --bg-badge: #EEEEEE;
     --bg-btn: #F5F5F5;
@@ -82,6 +87,8 @@ if (localStorage.getItem('cd-theme') === 'light')
     --text-placeholder: #AAAAAA;
     --text-pseudocode-label: #999999;
     --text-pseudocode: #444444;
+    --text-keyconcepts-label: #999999;
+    --text-keyconcepts: #444444;
     --text-btn: #555;
     --text-link: #5566DD;
     --text-toggle: #888;
@@ -93,6 +100,7 @@ if (localStorage.getItem('cd-theme') === 'light')
     --border-node: #E0E0E0;
     --border-imports: #E8E8E8;
     --border-pseudocode: #D0D8E0;
+    --border-keyconcepts: #D0D8E0;
     --border-btn: #D0D0D0;
     --border-breadcrumb: #D8D8DC;
     --border-textarea: #555;
@@ -370,6 +378,30 @@ body {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 13px;
     color: var(--text-pseudocode);
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.cd-keyconcepts {
+    background: var(--bg-keyconcepts);
+    border: 1px solid var(--border-keyconcepts);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.cd-keyconcepts__label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-keyconcepts-label);
+    margin-bottom: 4px;
+}
+
+.cd-keyconcepts__content {
+    font-size: 13px;
+    color: var(--text-keyconcepts);
     margin: 0;
     white-space: pre-wrap;
 }
@@ -867,6 +899,15 @@ function renderNode(node, depth) {
         body.appendChild(summaryEl);
     }
 
+    // Key Concepts
+    if (node.key_concepts) {
+        const kc = document.createElement('div');
+        kc.className = 'cd-keyconcepts';
+        kc.innerHTML = '<div class="cd-keyconcepts__label">KEY CONCEPTS</div>' +
+            '<div class="cd-keyconcepts__content">' + escapeHtml(node.key_concepts) + '</div>';
+        body.appendChild(kc);
+    }
+
     // Pseudocode
     if (node.pseudocode && (node.node_type === 'function' || node.node_type === 'method')) {
         const pc = document.createElement('div');
@@ -980,13 +1021,24 @@ function analyzeNode(nodeId, linkEl, bodyEl) {
                 summary.textContent = data.summary;
                 loading.replaceWith(summary);
 
+                // Add key concepts if present
+                var lastInserted = summary;
+                if (data.key_concepts) {
+                    const kc = document.createElement('div');
+                    kc.className = 'cd-keyconcepts';
+                    kc.innerHTML = '<div class="cd-keyconcepts__label">KEY CONCEPTS</div>' +
+                        '<div class="cd-keyconcepts__content">' + escapeHtml(data.key_concepts) + '</div>';
+                    lastInserted.after(kc);
+                    lastInserted = kc;
+                }
+
                 // Add pseudocode if present
                 if (data.pseudocode && (data.node_type === 'function' || data.node_type === 'method')) {
                     const pc = document.createElement('div');
                     pc.className = 'cd-pseudocode';
                     pc.innerHTML = '<div class="cd-pseudocode__label">PSEUDOCODE</div>' +
                         '<pre class="cd-pseudocode__code">' + escapeHtml(data.pseudocode) + '</pre>';
-                    summary.after(pc);
+                    lastInserted.after(pc);
                 }
 
                 // Add warnings if present
@@ -1039,7 +1091,52 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('cd-root-path').textContent = TREE_DATA.filepath || TREE_DATA.name;
     document.getElementById('cd-bc-root').textContent = TREE_DATA.name;
     document.getElementById('cd-main').appendChild(renderNode(TREE_DATA, 0));
+
+    // Handle ?node=<node_id> deep-link (e.g. from architecture view)
+    var params = new URLSearchParams(window.location.search);
+    var targetId = params.get('node');
+    if (targetId) {
+        cdExpandToNode(targetId);
+    }
 });
+
+function cdExpandToNode(nodeId) {
+    var target = document.querySelector('.cd-node[data-node-id="' + nodeId + '"]');
+    if (!target) return;
+
+    // Walk up the DOM and expand every ancestor .cd-node
+    var el = target.parentElement;
+    while (el) {
+        if (el.classList && el.classList.contains('cd-node')) {
+            var body = el.querySelector(':scope > .cd-node__body');
+            if (body && !body.classList.contains('cd-node__body--open')) {
+                body.classList.add('cd-node__body--open');
+                var toggle = el.querySelector(':scope > .cd-node__header .cd-node__toggle');
+                if (toggle) toggle.textContent = 'v';
+            }
+        }
+        el = el.parentElement;
+    }
+
+    // Expand the target node itself
+    var targetBody = target.querySelector(':scope > .cd-node__body');
+    if (targetBody && !targetBody.classList.contains('cd-node__body--open')) {
+        targetBody.classList.add('cd-node__body--open');
+        var targetToggle = target.querySelector(':scope > .cd-node__header .cd-node__toggle');
+        if (targetToggle) targetToggle.textContent = 'v';
+    }
+
+    // Highlight and scroll to it
+    target.style.outline = '2px solid var(--text-link)';
+    target.style.outlineOffset = '-2px';
+    setTimeout(function() {
+        target.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }, 100);
+    setTimeout(function() {
+        target.style.outline = '';
+        target.style.outlineOffset = '';
+    }, 3000);
+}
 
 // Shutdown on tab close
 window.addEventListener('beforeunload', function() {

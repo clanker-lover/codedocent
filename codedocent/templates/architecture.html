@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+{% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>codedocent — architecture</title>
+<script>
+if (localStorage.getItem('cd-theme') === 'light')
+    document.documentElement.classList.add('light-mode');
+</script>
+<style>
+:root {
+    --bg-body: #1a1a2e;
+    --bg-header: #12122a;
+    --bg-tooltip: #222240;
+    --bg-btn: #2e2e50;
+    --bg-btn-hover: #3a3a5a;
+
+    --text-primary: #e0e0e0;
+    --text-body: #e0e0e0;
+    --text-btn: #bbbbcc;
+    --text-muted: #8888aa;
+    --text-link: #7799ee;
+
+    --border-btn: #4a4a6a;
+    --border-tooltip: #3a3a5a;
+
+    --shadow-tooltip: rgba(0, 0, 0, 0.5);
+}
+
+:root.light-mode {
+    --bg-body: #F5F5F5;
+    --bg-header: #1A1A2E;
+    --bg-tooltip: #FFFFFF;
+    --bg-btn: #F5F5F5;
+    --bg-btn-hover: #E8E8E8;
+
+    --text-primary: #333;
+    --text-body: #333;
+    --text-btn: #555;
+    --text-muted: #888888;
+    --text-link: #5566DD;
+
+    --border-btn: #D0D0D0;
+    --border-tooltip: #E0E0E0;
+
+    --shadow-tooltip: rgba(0, 0, 0, 0.12);
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-body);
+    color: var(--text-body);
+    overflow: hidden;
+}
+
+.cd-arch-header {
+    background: var(--bg-header);
+    color: #FFFFFF;
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 10;
+}
+
+.cd-arch-header__left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.cd-arch-header__title {
+    margin: 0;
+    font-size: 18px;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-weight: 700;
+}
+
+.cd-arch-header__project {
+    font-size: 13px;
+    opacity: 0.7;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+.cd-arch-header__right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cd-arch-btn {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: transparent;
+    color: #FFF;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.cd-arch-btn:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.6);
+}
+
+.cd-arch-btn--hidden {
+    display: none;
+}
+
+.cd-theme-toggle {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #FFF;
+    line-height: 1;
+}
+
+.cd-theme-toggle:hover {
+    border-color: rgba(255,255,255,0.6);
+}
+
+#cd-graph {
+    width: 100%;
+    height: calc(100vh - 52px);
+    display: block;
+}
+
+.cd-tooltip {
+    position: absolute;
+    background: var(--bg-tooltip);
+    border: 1px solid var(--border-tooltip);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px var(--shadow-tooltip);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 20;
+    max-width: 320px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.cd-tooltip--visible {
+    opacity: 1;
+}
+
+.cd-tooltip__name {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.cd-tooltip__stats {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.cd-tooltip__quality {
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.cd-tooltip__summary {
+    font-size: 12px;
+    color: var(--text-muted);
+    max-height: 60px;
+    overflow: hidden;
+}
+
+.cd-edge-tooltip {
+    position: absolute;
+    background: var(--bg-tooltip);
+    border: 1px solid var(--border-tooltip);
+    border-radius: 8px;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px var(--shadow-tooltip);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 20;
+    max-width: 280px;
+    font-size: 12px;
+}
+
+.cd-edge-tooltip--visible {
+    opacity: 1;
+}
+
+.cd-error-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 16px;
+    z-index: 5;
+}
+
+.cd-legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-muted);
+    z-index: 10;
+}
+
+.cd-legend__item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cd-legend__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+@media (max-width: 600px) {
+    .cd-arch-header {
+        padding: 10px 12px;
+    }
+    .cd-arch-header__title {
+        font-size: 15px;
+    }
+}
+</style>
+</head>
+<body>
+
+<header class="cd-arch-header">
+    <div class="cd-arch-header__left">
+        <h1 class="cd-arch-header__title">codedocent</h1>
+        <span class="cd-arch-header__project">{{ project_name }}</span>
+    </div>
+    <div class="cd-arch-header__right">
+        <button class="cd-arch-btn cd-arch-btn--hidden" id="cd-back-btn" onclick="cdBack()">Back</button>
+        <button class="cd-arch-btn" id="cd-interactive-btn" onclick="cdGoInteractive()">Interactive</button>
+        <button class="cd-arch-btn" id="cd-export-btn" onclick="cdExport()">Export MD</button>
+        <button class="cd-theme-toggle" id="cd-theme-toggle"
+                onclick="cdToggleTheme()" aria-label="Toggle theme"></button>
+    </div>
+</header>
+
+<div class="cd-tooltip" id="cd-tooltip">
+    <div class="cd-tooltip__name" id="cd-tooltip-name"></div>
+    <div class="cd-tooltip__stats" id="cd-tooltip-stats"></div>
+    <div class="cd-tooltip__quality" id="cd-tooltip-quality"></div>
+    <div class="cd-tooltip__summary" id="cd-tooltip-summary"></div>
+</div>
+
+<div class="cd-edge-tooltip" id="cd-edge-tooltip"></div>
+
+<div class="cd-error-msg cd-arch-btn--hidden" id="cd-error-msg"></div>
+
+<svg id="cd-graph"></svg>
+
+<div class="cd-legend" id="cd-legend">
+    <span class="cd-legend__item"><span class="cd-legend__dot" style="background:#4CAF50"></span> Clean</span>
+    <span class="cd-legend__item"><span class="cd-legend__dot" style="background:#FF9800"></span> Complex</span>
+    <span class="cd-legend__item"><span class="cd-legend__dot" style="background:#F44336"></span> Warning</span>
+</div>
+
+<script>
+// D3.js CDN load with fallback
+(function() {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js';
+    script.crossOrigin = 'anonymous';
+    script.onload = function() { cdInit(); };
+    script.onerror = function() {
+        document.getElementById('cd-error-msg').textContent =
+            'Failed to load D3.js. Check your internet connection.';
+        document.getElementById('cd-error-msg').classList.remove('cd-arch-btn--hidden');
+    };
+    document.head.appendChild(script);
+})();
+</script>
+
+<script>
+// Theme toggle
+function cdToggleTheme() {
+    var isLight = document.documentElement.classList.toggle('light-mode');
+    localStorage.setItem('cd-theme', isLight ? 'light' : 'dark');
+    document.getElementById('cd-theme-toggle').textContent = isLight ? '\u{1F319}' : '\u2600\uFE0F';
+}
+(function() {
+    var btn = document.getElementById('cd-theme-toggle');
+    if (btn) btn.textContent = document.documentElement.classList.contains('light-mode') ? '\u{1F319}' : '\u2600\uFE0F';
+})();
+
+// State
+var currentLevel = 0;
+var currentModule = '';
+var simulation = null;
+var CSRF_TOKEN = '';
+var cdNavigatingInternally = false;
+
+// Quality colors
+var QUALITY_COLORS = {
+    'clean': '#4CAF50',
+    'complex': '#FF9800',
+    'warning': '#F44336'
+};
+
+function qualityLabel(q) {
+    return {'clean': 'Clean', 'complex': 'Complex', 'warning': 'Warning'}[q] || 'Clean';
+}
+
+function cdInit() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    CSRF_TOKEN = meta ? meta.getAttribute('content') : '';
+    loadArchitecture();
+}
+
+function loadArchitecture() {
+    currentLevel = 0;
+    currentModule = '';
+    document.getElementById('cd-back-btn').classList.add('cd-arch-btn--hidden');
+    document.getElementById('cd-error-msg').classList.add('cd-arch-btn--hidden');
+
+    fetch('/api/graph/architecture', {
+        headers: {'X-Codedocent-Token': CSRF_TOKEN}
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.nodes || data.nodes.length === 0) {
+            document.getElementById('cd-error-msg').textContent = 'No modules detected.';
+            document.getElementById('cd-error-msg').classList.remove('cd-arch-btn--hidden');
+            clearGraph();
+            return;
+        }
+        renderGraph(data);
+    })
+    .catch(function(err) {
+        document.getElementById('cd-error-msg').textContent = 'Failed to load graph: ' + err.message;
+        document.getElementById('cd-error-msg').classList.remove('cd-arch-btn--hidden');
+    });
+}
+
+function loadModule(path) {
+    currentLevel = 1;
+    currentModule = path;
+    document.getElementById('cd-back-btn').classList.remove('cd-arch-btn--hidden');
+    document.getElementById('cd-error-msg').classList.add('cd-arch-btn--hidden');
+
+    fetch('/api/graph/module/' + encodeURIComponent(path), {
+        headers: {'X-Codedocent-Token': CSRF_TOKEN}
+    })
+    .then(function(r) {
+        if (r.status === 404) throw new Error('Module not found');
+        return r.json();
+    })
+    .then(function(data) {
+        renderGraph(data);
+    })
+    .catch(function(err) {
+        document.getElementById('cd-error-msg').textContent = 'Failed to load module: ' + err.message;
+        document.getElementById('cd-error-msg').classList.remove('cd-arch-btn--hidden');
+    });
+}
+
+function clearGraph() {
+    if (simulation) {
+        simulation.stop();
+        simulation = null;
+    }
+    d3.select('#cd-graph').selectAll('*').remove();
+}
+
+function renderGraph(data) {
+    clearGraph();
+
+    var svg = d3.select('#cd-graph');
+    var width = window.innerWidth;
+    var height = window.innerHeight - 52;
+
+    svg.attr('width', width).attr('height', height);
+
+    // Arrow marker definition
+    var defs = svg.append('defs');
+    defs.append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 20)
+        .attr('refY', 0)
+        .attr('markerWidth', 8)
+        .attr('markerHeight', 8)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', '#666');
+
+    // Zoomable group
+    var g = svg.append('g');
+
+    var zoom = d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', function(event) {
+            g.attr('transform', event.transform);
+        });
+
+    svg.call(zoom);
+
+    // Size scales
+    var lineExtent = d3.extent(data.nodes, function(d) { return d.line_count; });
+    var radiusScale = d3.scaleSqrt()
+        .domain([lineExtent[0] || 1, lineExtent[1] || 100])
+        .range([15, 50]);
+
+    var weightExtent = data.edges.length > 0
+        ? d3.extent(data.edges, function(d) { return d.weight; })
+        : [1, 1];
+    var widthScale = d3.scaleLinear()
+        .domain([weightExtent[0] || 1, weightExtent[1] || 1])
+        .range([1, 6]);
+
+    // Force simulation
+    simulation = d3.forceSimulation(data.nodes)
+        .force('link', d3.forceLink(data.edges)
+            .id(function(d) { return d.id; })
+            .distance(function(d) { return 120; }))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(function(d) {
+            return radiusScale(d.line_count) + 5;
+        }));
+
+    // Edges
+    var link = g.append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(data.edges)
+        .enter().append('line')
+        .attr('stroke', '#666')
+        .attr('stroke-opacity', 0.5)
+        .attr('stroke-width', function(d) { return widthScale(d.weight); })
+        .attr('marker-end', 'url(#arrowhead)')
+        .on('mouseover', function(event, d) {
+            var tooltip = document.getElementById('cd-edge-tooltip');
+            var imports = d.imports.slice(0, 5).join(', ');
+            if (d.imports.length > 5) imports += ' (+' + (d.imports.length - 5) + ' more)';
+            var srcName = d.source.name || d.source.id || d.source;
+            var tgtName = d.target.name || d.target.id || d.target;
+            tooltip.innerHTML = '<strong>' + escapeHtml(String(srcName)) + ' &rarr; ' + escapeHtml(String(tgtName)) + '</strong><br>' +
+                '<span style="color:var(--text-muted)">' + d.weight + ' import(s): ' + escapeHtml(imports) + '</span>';
+            tooltip.classList.add('cd-edge-tooltip--visible');
+            tooltip.style.left = event.pageX + 12 + 'px';
+            tooltip.style.top = event.pageY - 10 + 'px';
+        })
+        .on('mouseout', function() {
+            document.getElementById('cd-edge-tooltip').classList.remove('cd-edge-tooltip--visible');
+        });
+
+    // Nodes
+    var node = g.append('g')
+        .attr('class', 'nodes')
+        .selectAll('g')
+        .data(data.nodes)
+        .enter().append('g')
+        .attr('cursor', 'pointer')
+        .call(d3.drag()
+            .on('start', function(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            })
+            .on('drag', function(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            })
+            .on('end', function(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }));
+
+    // Node circles
+    node.append('circle')
+        .attr('r', function(d) { return radiusScale(d.line_count); })
+        .attr('fill', function(d) { return QUALITY_COLORS[d.quality] || QUALITY_COLORS['clean']; })
+        .attr('stroke', function(d) { return d.node_type === 'external' ? '#888' : '#fff'; })
+        .attr('stroke-width', function(d) { return d.node_type === 'external' ? 1 : 2; })
+        .attr('stroke-dasharray', function(d) { return d.node_type === 'external' ? '4,3' : 'none'; })
+        .attr('opacity', function(d) { return d.node_type === 'external' ? 0.4 : 0.85; });
+
+    // Node labels
+    node.append('text')
+        .text(function(d) { return d.name; })
+        .attr('text-anchor', 'middle')
+        .attr('dy', function(d) { return radiusScale(d.line_count) + 14; })
+        .attr('font-size', '11px')
+        .attr('font-family', '"SF Mono", "Fira Code", "Consolas", monospace')
+        .attr('fill', 'var(--text-primary)')
+        .attr('pointer-events', 'none');
+
+    // File count labels (for modules)
+    node.filter(function(d) { return d.node_type === 'module' && d.file_count > 1; })
+        .append('text')
+        .text(function(d) { return d.file_count; })
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .attr('font-size', '12px')
+        .attr('font-weight', '700')
+        .attr('fill', '#fff')
+        .attr('pointer-events', 'none');
+
+    // Tooltip
+    var tooltip = document.getElementById('cd-tooltip');
+
+    node.on('mouseover', function(event, d) {
+        document.getElementById('cd-tooltip-name').textContent = d.name;
+        var stats = [];
+        if (d.node_type === 'module') stats.push(d.file_count + ' files');
+        stats.push(d.line_count.toLocaleString() + ' lines');
+        document.getElementById('cd-tooltip-stats').textContent = stats.join(' | ');
+        document.getElementById('cd-tooltip-quality').textContent = 'Quality: ' + qualityLabel(d.quality);
+        document.getElementById('cd-tooltip-quality').style.color = QUALITY_COLORS[d.quality] || QUALITY_COLORS['clean'];
+        document.getElementById('cd-tooltip-summary').textContent = d.summary || '';
+        tooltip.classList.add('cd-tooltip--visible');
+        tooltip.style.left = event.pageX + 16 + 'px';
+        tooltip.style.top = event.pageY - 10 + 'px';
+    })
+    .on('mousemove', function(event) {
+        tooltip.style.left = event.pageX + 16 + 'px';
+        tooltip.style.top = event.pageY - 10 + 'px';
+    })
+    .on('mouseout', function() {
+        tooltip.classList.remove('cd-tooltip--visible');
+    });
+
+    // Click handler
+    node.on('click', function(event, d) {
+        event.stopPropagation();
+        tooltip.classList.remove('cd-tooltip--visible');
+        if (currentLevel === 0 && d.node_type === 'module') {
+            loadModule(d.id);
+        } else if (currentLevel === 1 && d.node_type === 'file' && d.node_id) {
+            cdNavigatingInternally = true;
+            window.location.href = '/?node=' + d.node_id;
+        }
+    });
+
+    // Tick
+    simulation.on('tick', function() {
+        link
+            .attr('x1', function(d) { return d.source.x; })
+            .attr('y1', function(d) { return d.source.y; })
+            .attr('x2', function(d) { return d.target.x; })
+            .attr('y2', function(d) { return d.target.y; });
+
+        node.attr('transform', function(d) {
+            return 'translate(' + d.x + ',' + d.y + ')';
+        });
+    });
+}
+
+function cdBack() {
+    loadArchitecture();
+}
+
+function cdGoInteractive() {
+    cdNavigatingInternally = true;
+    window.location.href = '/';
+}
+
+function cdExport() {
+    var url = currentLevel === 0
+        ? '/api/graph/export/architecture'
+        : '/api/graph/export/module/' + encodeURIComponent(currentModule);
+    var filename = currentLevel === 0 ? 'ARCHITECTURE.md' : 'MODULE_' + currentModule.replace(/\//g, '_') + '.md';
+
+    fetch(url, {
+        headers: {'X-Codedocent-Token': CSRF_TOKEN}
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.markdown) return;
+        var blob = new Blob([data.markdown], {type: 'text/markdown'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    })
+    .catch(function(err) {
+        console.error('Export failed:', err);
+    });
+}
+
+function escapeHtml(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// Handle resize
+window.addEventListener('resize', function() {
+    var svg = d3.select('#cd-graph');
+    svg.attr('width', window.innerWidth);
+    svg.attr('height', window.innerHeight - 52);
+    if (simulation) {
+        simulation.force('center', d3.forceCenter(window.innerWidth / 2, (window.innerHeight - 52) / 2));
+        simulation.alpha(0.3).restart();
+    }
+});
+
+// Shutdown on tab close (skip for internal navigation)
+window.addEventListener('beforeunload', function() {
+    if (cdNavigatingInternally || !CSRF_TOKEN) return;
+    fetch('/shutdown', {
+        method: 'POST',
+        headers: {'X-Codedocent-Token': CSRF_TOKEN},
+        keepalive: true
+    });
+});
+</script>
+
+</body>
+</html>

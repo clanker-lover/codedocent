@@ -25,7 +25,7 @@ except ImportError:
     ollama = None  # type: ignore[assignment]
 
 CACHE_FILENAME = ".codedocent_cache.json"
-MAX_SOURCE_LINES = 200
+MAX_SOURCE_LINES = 300
 MIN_LINES_FOR_AI = 3
 
 
@@ -42,29 +42,70 @@ def _count_nodes(node: CodeNode) -> int:
     return 1 + sum(_count_nodes(c) for c in node.children)
 
 
-def _build_prompt(node: CodeNode, model: str = "") -> str:
-    """Build the AI prompt for a given node."""
+def _build_prompt(
+    node: CodeNode, model: str = "",
+    *, deps: dict[str, list[str]] | None = None,
+) -> str:
+    """Build the AI prompt for a given node.
+
+    *deps*, when provided, is ``{"imports_from": [...], "imported_by": [...]}``.
+    """
     language = node.language or "unknown"
     source = node.source
     lines = source.splitlines()
-    if len(lines) > MAX_SOURCE_LINES:
+    truncated = len(lines) > MAX_SOURCE_LINES
+    if truncated:
         source = "\n".join(lines[:MAX_SOURCE_LINES])
 
+    filename = node.name or "unknown"
+
+    # Dependency context block
+    if deps:
+        imports_from = ", ".join(deps["imports_from"]) or "nothing in this project"
+        imported_by = ", ".join(deps["imported_by"]) or "nothing — may be an entry point or utility"
+    else:
+        imports_from = "unknown"
+        imported_by = "unknown"
+
+    ctx_block = (
+        f"CONTEXT:\n"
+        f"- File: {filename}\n"
+        f"- Language: {language}\n"
+        f"- This file imports from: {imports_from}\n"
+        f"- This file is imported by: {imported_by}\n"
+    )
+
+    truncation_note = ""
+    if truncated:
+        truncation_note = (
+            f"\n(Note: code is truncated to first {MAX_SOURCE_LINES} "
+            f"of {len(lines)} lines.)\n"
+        )
+
     prompt = (
-        f"You are a code explainer for non-programmers. "
-        f"Given the following {language} code, provide:\n\n"
-        f"1. SUMMARY: A plain English explanation (1-3 sentences) "
-        f"that a "
-        f"non-programmer can understand. Explain WHAT it does "
-        f"and WHY, not HOW. "
-        f"Avoid jargon.\n\n"
-        f"2. PSEUDOCODE: A simplified pseudocode version using plain English "
-        f"function/variable names. Keep it short.\n\n"
+        f"You are explaining code to someone who can read schematics "
+        f"but not source code. They understand systems thinking — inputs, "
+        f"outputs, data flow — but not programming syntax.\n\n"
+        f"{ctx_block}\n"
+        f"Given this context and the code below, provide:\n\n"
+        f"1. ROLE: What job does this code do in the system? Is it a "
+        f"foundation others build on? An orchestrator? A utility? An entry "
+        f"point? (1-2 sentences)\n\n"
+        f"2. SUMMARY: What does it receive, what does it produce, and who "
+        f"cares? Explain the data flow. (2-4 sentences)\n\n"
+        f"3. KEY CONCEPTS: What are the main things (functions, classes, "
+        f"data structures) this code creates or works with? Just names "
+        f"and one-line descriptions. (bullet list, 3-5 items max)\n\n"
+        f"4. PSEUDOCODE: Simplified plain-English version of the main "
+        f"logic. (keep short)\n\n"
         f"Respond in exactly this format:\n"
-        f"SUMMARY: <your summary>\n"
+        f"ROLE: <role>\n"
+        f"SUMMARY: <summary>\n"
+        f"KEY CONCEPTS:\n"
+        f"- <name>: <what it does>\n"
         f"PSEUDOCODE:\n"
-        f"<your pseudocode>\n\n"
-        f"Here is the code:\n"
+        f"<pseudocode>\n\n"
+        f"Here is the code:{truncation_note}\n"
         f"```{language}\n"
         f"{source}\n"
         f"```"
@@ -88,20 +129,46 @@ def _strip_think_tags(text: str) -> str:
     return text.strip()
 
 
-def _parse_ai_response(text: str) -> tuple[str, str]:
-    """Parse SUMMARY and PSEUDOCODE from AI response text."""
+def _parse_ai_response(text: str) -> tuple[str, str, str]:
+    """Parse ROLE, SUMMARY, KEY CONCEPTS, and PSEUDOCODE from AI response.
+
+    Returns ``(summary, pseudocode, key_concepts)``.
+    ROLE is prepended to SUMMARY for a combined summary field.
+    Gracefully falls back to the old 2-field format if ROLE is absent.
+    """
+    role = ""
     summary = ""
+    key_concepts = ""
     pseudocode = ""
 
+    role_match = re.search(
+        r"ROLE:\s*(.*?)(?=\nSUMMARY:|\nKEY CONCEPTS:|\nPSEUDOCODE:|$)",
+        text, re.DOTALL,
+    )
     summary_match = re.search(
-        r"SUMMARY:\s*(.*?)(?=\nPSEUDOCODE:|$)", text, re.DOTALL
+        r"SUMMARY:\s*(.*?)(?=\nKEY CONCEPTS:|\nPSEUDOCODE:|$)",
+        text, re.DOTALL,
+    )
+    kc_match = re.search(
+        r"KEY CONCEPTS:\s*(.*?)(?=\nPSEUDOCODE:|$)",
+        text, re.DOTALL,
     )
     pseudocode_match = re.search(r"PSEUDOCODE:\s*(.*)", text, re.DOTALL)
 
+    if role_match:
+        role = role_match.group(1).strip()
     if summary_match:
         summary = summary_match.group(1).strip()
+    if kc_match:
+        key_concepts = kc_match.group(1).strip()
     if pseudocode_match:
         pseudocode = pseudocode_match.group(1).strip()
+
+    # Combine ROLE + SUMMARY into the summary field
+    if role and summary:
+        summary = f"{role}\n\n{summary}"
+    elif role:
+        summary = role
 
     # Fallback: first line as summary if parsing failed
     if not summary:
@@ -109,7 +176,7 @@ def _parse_ai_response(text: str) -> tuple[str, str]:
         if lines:
             summary = lines[0].strip()
 
-    return summary, pseudocode
+    return summary, pseudocode, key_concepts
 
 
 _AI_TIMEOUT = 120
@@ -117,15 +184,16 @@ _AI_TIMEOUT = 120
 
 def _summarize_with_cloud(
     node: CodeNode, ai_config: dict,
-) -> tuple[str, str] | None:
-    """Call a cloud AI endpoint for summary and pseudocode.
+    *, deps: dict[str, list[str]] | None = None,
+) -> tuple[str, str, str] | None:
+    """Call a cloud AI endpoint for summary, pseudocode, and key concepts.
 
     Returns ``None`` if the call times out.
     Raises ``RuntimeError`` on API errors.
     """
     from codedocent.cloud_ai import cloud_chat  # pylint: disable=import-outside-toplevel  # noqa: E501
 
-    prompt = _build_prompt(node, ai_config["model"])
+    prompt = _build_prompt(node, ai_config["model"], deps=deps)
     pool = ThreadPoolExecutor(max_workers=1)
     future = pool.submit(
         cloud_chat,
@@ -141,24 +209,25 @@ def _summarize_with_cloud(
     pool.shutdown(wait=False)
     raw = _strip_think_tags(raw)
     if not raw or len(raw) < 10:
-        return ("Could not generate summary", "")
-    summary, pseudocode = _parse_ai_response(raw)
+        return ("Could not generate summary", "", "")
+    summary, pseudocode, key_concepts = _parse_ai_response(raw)
     if not summary or len(summary) < 5:
         summary = "Could not generate summary"
-    return summary, pseudocode
+    return summary, pseudocode, key_concepts
 
 
 def _summarize_with_ai(
     node: CodeNode, model: str, ai_config: dict | None = None,
-) -> tuple[str, str] | None:
-    """Call ollama (or cloud) to get summary and pseudocode for a node.
+    *, deps: dict[str, list[str]] | None = None,
+) -> tuple[str, str, str] | None:
+    """Call ollama (or cloud) to get summary, pseudocode, and key concepts.
 
     Returns ``None`` if the AI call times out.
     """
     if ai_config and ai_config.get("backend") == "cloud":
-        return _summarize_with_cloud(node, ai_config)
+        return _summarize_with_cloud(node, ai_config, deps=deps)
 
-    prompt = _build_prompt(node, model)
+    prompt = _build_prompt(node, model, deps=deps)
     pool = ThreadPoolExecutor(max_workers=1)
     future = pool.submit(
         ollama.chat,
@@ -179,12 +248,12 @@ def _summarize_with_ai(
     raw = _strip_think_tags(raw)
     # Garbage response fallback: empty or very short after stripping
     if not raw or len(raw) < 10:
-        return ("Could not generate summary", "")
-    summary, pseudocode = _parse_ai_response(raw)
+        return ("Could not generate summary", "", "")
+    summary, pseudocode, key_concepts = _parse_ai_response(raw)
     # Final guard: if summary is empty or too short, replace it
     if not summary or len(summary) < 5:
         summary = "Could not generate summary"
-    return summary, pseudocode
+    return summary, pseudocode, key_concepts
 
 
 def _cache_model_id(model: str, ai_config: dict | None = None) -> str:
@@ -281,10 +350,12 @@ def assign_node_ids(root: CodeNode) -> dict[str, CodeNode]:
 def analyze_single_node(  # pylint: disable=too-many-locals
     node: CodeNode, model: str, cache_dir: str,
     *, ai_config: dict | None = None,
+    deps: dict[str, list[str]] | None = None,
 ) -> None:
     """Run quality scoring + AI analysis on a single node.
 
     Reads/writes the cache. Applies min-lines guard and garbage fallback.
+    *deps* is optional dependency context from ``graph.get_file_dependencies``.
     """
     is_cloud = ai_config and ai_config.get("backend") == "cloud"
     if not is_cloud and ollama is None:
@@ -319,17 +390,25 @@ def analyze_single_node(  # pylint: disable=too-many-locals
         entry = cache["entries"][key]
         node.summary = entry.get("summary")
         node.pseudocode = entry.get("pseudocode")
+        node.key_concepts = entry.get("key_concepts")
         return
 
     try:
-        result = _summarize_with_ai(node, model, ai_config=ai_config)
+        result = _summarize_with_ai(
+            node, model, ai_config=ai_config, deps=deps,
+        )
         if result is None:
             node.summary = "Summary timed out"
             return
-        summary, pseudocode = result
+        summary, pseudocode, key_concepts = result
         node.summary = summary
         node.pseudocode = pseudocode
-        cache["entries"][key] = {"summary": summary, "pseudocode": pseudocode}
+        node.key_concepts = key_concepts
+        cache["entries"][key] = {
+            "summary": summary,
+            "pseudocode": pseudocode,
+            "key_concepts": key_concepts,
+        }
         _save_cache(cache_path, cache)
     except (
         ConnectionError, RuntimeError, ValueError,
@@ -409,6 +488,7 @@ def _run_ai_batch(
     cache: dict,
     workers: int,
     ai_config: dict | None = None,
+    deps_map: dict[str, dict[str, list[str]]] | None = None,
 ) -> int:
     """Phases 2 & 3: AI-analyze files then code nodes."""
     total, counter = len(all_nodes), [0]
@@ -430,21 +510,29 @@ def _run_ai_batch(
                 entry = cache["entries"][key]
                 node.summary = entry.get("summary")
                 node.pseudocode = entry.get("pseudocode")
+                node.key_concepts = entry.get("key_concepts")
                 _progress(f"Cache hit: {node.name}")
                 return
         _progress(f"Analyzing {node.name}")
+        node_deps = (
+            deps_map.get(node.filepath) if deps_map and node.filepath else None
+        )
         try:
-            result = _summarize_with_ai(node, model, ai_config=ai_config)
+            result = _summarize_with_ai(
+                node, model, ai_config=ai_config, deps=node_deps,
+            )
             if result is None:
                 node.summary = "Summary timed out"
                 return
-            summary, pseudocode = result
+            summary, pseudocode, key_concepts = result
             with cache_lock:
                 node.summary = summary
                 node.pseudocode = pseudocode
+                node.key_concepts = key_concepts
                 cache["entries"][key] = {
                     "summary": summary,
                     "pseudocode": pseudocode,
+                    "key_concepts": key_concepts,
                 }
         except Exception as e:  # pylint: disable=broad-exception-caught
             node.summary = "Summary generation failed"
@@ -488,6 +576,23 @@ def _init_cache(
     return cache_path, cache
 
 
+def _build_deps_map(root: CodeNode) -> dict[str, dict[str, list[str]]]:
+    """Pre-compute dependency context for all files in the tree."""
+    try:
+        from codedocent.graph import get_file_dependencies, _collect_file_nodes  # pylint: disable=import-outside-toplevel  # noqa: E501
+    except ImportError:
+        return {}
+
+    project_root = root.filepath or "."
+    deps_map: dict[str, dict[str, list[str]]] = {}
+    for fnode in _collect_file_nodes(root):
+        if fnode.filepath:
+            deps_map[fnode.filepath] = get_file_dependencies(
+                root, project_root, fnode.filepath,
+            )
+    return deps_map
+
+
 def analyze(
     root: CodeNode,
     model: str = "qwen3:14b",
@@ -507,9 +612,12 @@ def analyze(
     _score_all_nodes(all_nodes)
     _rollup_file_quality(all_nodes)
 
+    deps_map = _build_deps_map(root)
+
     try:
         ai_count = _run_ai_batch(
-            all_nodes, model, cache, workers, ai_config=ai_config,
+            all_nodes, model, cache, workers,
+            ai_config=ai_config, deps_map=deps_map,
         )
     except ConnectionError as e:
         print(
