@@ -179,7 +179,7 @@ def _parse_ai_response(text: str) -> tuple[str, str, str]:
     return summary, pseudocode, key_concepts
 
 
-_AI_TIMEOUT = 120
+_AI_TIMEOUT = 180
 
 
 def _summarize_with_cloud(
