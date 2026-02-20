@@ -1,7 +1,5 @@
 # codedocent
 
-<!-- Screenshot coming soon -->
-
 **Code visualization for non-programmers.**
 
 A docent is a guide who explains things to people who aren't experts. Codedocent does that for code.
@@ -15,6 +13,8 @@ Codedocent parses the codebase into a navigable, visual block structure and expl
 ## What's new in v1.0.0
 
 ### Architecture Mode
+
+![Architecture mode — dependency graph showing files as nodes with directed edges](https://raw.githubusercontent.com/clanker-lover/codedocent/main/docs/screenshots/architecture-mode.png)
 
 Visualize your codebase as a zoomable dependency graph. Three levels of detail:
 
@@ -31,6 +31,8 @@ codedocent /path/to/code --arch    # jump straight to architecture view
 Or choose option 4 in the setup wizard.
 
 ### Enhanced AI Summaries
+
+![Enhanced AI summary showing ROLE, SUMMARY, and KEY CONCEPTS for parser.py](https://raw.githubusercontent.com/clanker-lover/codedocent/main/docs/screenshots/enhanced-summary.png)
 
 AI analysis now understands where each file sits in the system:
 
