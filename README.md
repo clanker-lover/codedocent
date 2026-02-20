@@ -77,6 +77,16 @@ codedocent /path/to/code --cloud groq      # use Groq
 codedocent /path/to/code --cloud custom --endpoint https://my-llm/v1/chat/completions
 ```
 
+## GUI launcher
+
+![GUI launcher with folder picker, AI backend toggle, model dropdown, and mode selector](https://raw.githubusercontent.com/clanker-lover/codedocent/main/docs/screenshots/gui-launcher.png)
+
+If you prefer clicking over typing, `codedocent --gui` opens a graphical launcher. Pick a folder, choose your AI backend (cloud or local Ollama), select a model, and choose a mode — Interactive, Full export, Text tree, or Architecture. Hit Go.
+
+```bash
+codedocent --gui
+```
+
 ## How it works
 
 Parses code structure with tree-sitter, scores quality with static analysis, and sends individual blocks to a cloud AI provider or local Ollama model for plain English summaries and pseudocode. Interactive mode analyzes on click — typically 1-2 seconds per block. Full mode analyzes everything upfront into a self-contained HTML file you can share. Architecture mode builds a dependency graph from import statements and renders it as a zoomable D3 visualization.
