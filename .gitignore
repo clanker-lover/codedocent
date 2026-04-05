@@ -27,3 +27,8 @@ dist/
 benchmark.py
 benchmark_results.txt
 REVIEW.txt
+
+# Editor swap files
+*.swp
+diff.txt
+*.bak.*
