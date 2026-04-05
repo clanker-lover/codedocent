@@ -32,3 +32,4 @@ REVIEW.txt
 *.swp
 diff.txt
 *.bak.*
+.omc/
